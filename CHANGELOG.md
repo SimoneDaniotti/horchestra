@@ -10,7 +10,8 @@ First version.
   agents already running in the space, and hires/fires members.
 - `team.toml` per project as the team's source of truth (`agentmap-team`
   `init`, `scan`, `adopt`, `hire`, `fire`, `sync`, `status`, `report`).
-- Member status lines and "needs you" flags with Herdr notifications.
+- Member status lines and "needs you" flags with Herdr notifications, and
+  `agentmap-team message` for agent-to-agent messages by role.
 - Startup hook that repairs teams after a Herdr restart using recorded
   agent session ids.
 - `agent-map.setup` / `agent-map.teardown` for the machine-level pieces.

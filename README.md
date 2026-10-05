@@ -133,7 +133,8 @@ session = "a3ff62c9-…"
 | `agentmap-team adopt <pane> --role R [--task T]` | add a running agent, unchanged |
 | `agentmap-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: own tab named after the role, start the agent with its role profile, send its brief |
 | `agentmap-team fire R` | remove a member and close its pane |
-| `agentmap-team status` | show the team |
+| `agentmap-team status` | show the team, with each member's latest reported line |
+| `agentmap-team message R "text"` | send a message to a team agent by role (e.g. `orchestrator`); queued if it is busy |
 | `agentmap-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
 | `agentmap-team roles` | list role profiles in `.orchestra/roles` and who uses them |
 | `agentmap-team respawn R \| --all` | restart a Claude agent in place with its current profile, keeping its conversation |
@@ -219,8 +220,11 @@ agentmap-team report --needs-you "Use v1 or v2 API docs?"
 agentmap-team report --clear
 ```
 
-Hired members are told how in their brief; the orchestrator tells adopted
-ones. A needs-you report shows `!` until the agent works again and sends a
+`report` only updates the map (and `status`); to tell the orchestrator
+something, a member runs `agentmap-team message orchestrator "…"`, which
+arrives in the orchestrator's conversation as
+`[agent-map] message from <role>: …`. Hired and respawned members have both
+commands in their instructions; the orchestrator tells adopted ones. A needs-you report shows `!` until the agent works again and sends a
 Herdr notification. Herdr's own "agent finished / needs input" alerts cover
 the rest. Both follow `[ui.toast]` in Herdr's config, which is off by default:
 
