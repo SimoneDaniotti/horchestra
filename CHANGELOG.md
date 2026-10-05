@@ -17,3 +17,8 @@ First version.
 - Role profiles (`.orchestra/roles/<role>/`): per-member instructions and
   role-only skills, plus `only_skills` (allowlist), `uses_skills` and
   `deny_skills` in team.toml.
+- `agentmap-team respawn`: apply a profile to a running Claude agent without
+  losing its conversation; the startup hook re-applies profiles after a
+  Herdr restart.
+- Tabs and Claude conversations named after each role (`--name`), kept in
+  step on hire, adopt, respawn and restart.

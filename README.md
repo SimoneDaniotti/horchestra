@@ -131,16 +131,25 @@ session = "a3ff62c9-…"
 | `agentmap-team init` | register the calling agent as orchestrator; open maps |
 | `agentmap-team scan` | list running agents in the space that are not on the team |
 | `agentmap-team adopt <pane> --role R [--task T]` | add a running agent, unchanged |
-| `agentmap-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: new pane in the `team` tab, start the agent with its role profile, send its brief |
+| `agentmap-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: own tab named after the role, start the agent with its role profile, send its brief |
 | `agentmap-team fire R` | remove a member and close its pane |
 | `agentmap-team status` | show the team |
 | `agentmap-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
 | `agentmap-team roles` | list role profiles in `.orchestra/roles` and who uses them |
+| `agentmap-team respawn R \| --all` | restart a Claude agent in place with its current profile, keeping its conversation |
 | `agentmap-team up` | start `claude --agent orchestrator` in the current pane (also the `agent-map.team-up` action) |
 
-Team panes are labelled `team:<role>` and their agents are named
-`<project>-<role>` (e.g. `webshop-slides`), so the orchestrator can
-message them with `herdr agent prompt <name> "…"`.
+Names stay in step with roles:
+
+- each hired member gets its own tab named after its role, and every
+  `agentmap-team` command renames an agent's tab to its role when it is the
+  only agent in that tab (set `name_tabs = false` in team.toml to turn off)
+- Claude members and the orchestrator are started with `--name <role>`, so the
+  conversation (prompt box, `/resume` picker, terminal title) has the same
+  name; `respawn` and the restart repair apply it again
+- panes are labelled `team:<role>`, and Herdr agent names are
+  `<project>-<role>` (e.g. `webshop-slides`) for
+  `herdr agent prompt <name> "…"`
 
 ### Role profiles: each member's own instructions and skills
 
@@ -186,11 +195,19 @@ What is and is not guaranteed (tested with Claude Code 2.1):
 | Role-only skills | available, from the profile folder |
 | Denied skills | cannot be used (the call is refused), but are still listed |
 | `only_skills` | instruction for all skills; hard block for skills on disk; plugin and built-in skills rely on the instruction |
-| After a Herdr restart | instructions stay; role-only skills and deny rules are lost until the member is re-hired (the orchestrator is told which) |
+| After a Herdr restart | the startup hook re-applies each member's profile (see below) |
 
 Check a member from its pane with `/skills` and `/context`; `agentmap-team
 status`, `agentmap-team roles`, and the map's details box show each member's
-profile. Adopted agents keep the context they were started with.
+profile.
+
+**Applying a profile to a running agent.** `agentmap-team respawn <role>`
+quits the member's Claude session and restarts it in the same pane with
+`claude --resume <its session> --system-prompt-snapshot off` plus its profile
+flags. It keeps its whole conversation and gains the role instructions,
+skills, and deny rules. Use it after adopting an agent, after editing a
+ROLE.md, or with `--all` for the whole team. Wait until the member is idle
+(or pass `--force`). Claude only; it takes a few seconds per member.
 
 ### Status lines and "needs you"
 
@@ -224,6 +241,11 @@ integrations are current. The plugin's startup hook then:
 - starts a fresh orchestrator in its pane if its conversation could not be
   resumed
 - reopens map panes, which come back as idle shells
+
+- respawns every Claude member launched with a profile, because Herdr's plain
+  `claude --resume` would bring back the instructions recorded when the
+  conversation began; the orchestrator is refreshed from the current
+  `orchestrator.md` the same way
 
 Members whose conversation did not resume are reported to the orchestrator,
 never restarted automatically, so nothing runs twice. Results are in
