@@ -62,11 +62,11 @@ class LaunchTest(unittest.TestCase):
             profile = roles.load(root, {}, {"role": "slides", "uses_skills": ["slide-kit"],
                                             "deny_skills": ["graph-tool"]})
             args = roles.claude_args(root, state, "proj-slides", profile, "You are on a team.")
-            self.assertEqual(args[:2], ["--agent", "orchestra-slides"])
+            self.assertEqual(args[:2], ["--agent", "horchestra-slides"])
             self.assertEqual(args[-2:], ["--add-dir", folder])  # variadic flag last
-            with open(os.path.join(root, ".claude", "agents", "orchestra-slides.md")) as fh:
+            with open(os.path.join(root, ".claude", "agents", "horchestra-slides.md")) as fh:
                 agent = fh.read()
-            for expected in ("name: orchestra-slides", "Codeword TULIP.", "`slide-kit`",
+            for expected in ("name: horchestra-slides", "Codeword TULIP.", "`slide-kit`",
                              "`deck-style`", "`graph-tool`", "You are on a team."):
                 self.assertIn(expected, agent)
             with open(args[args.index("--settings") + 1]) as fh:
@@ -75,7 +75,7 @@ class LaunchTest(unittest.TestCase):
             self.assertEqual(settings["env"]["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"], "1")
 
     def test_agent_names_are_safe(self):
-        self.assertEqual(roles.agent_name("Research Lead!"), "orchestra-research-lead")
+        self.assertEqual(roles.agent_name("Research Lead!"), "horchestra-research-lead")
 
 
 class OnlySkillsTest(unittest.TestCase):

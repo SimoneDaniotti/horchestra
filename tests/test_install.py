@@ -19,11 +19,24 @@ class BlockTest(unittest.TestCase):
     def test_key_in_use_or_already_bound_is_left_alone(self):
         taken = CONFIG + '[[keys.command]]\nkey = "prefix+m"\ntype = "shell"\ncommand = "x"\n'
         self.assertEqual(install.add_block(taken)[0], taken)
-        bound = CONFIG + '[[keys.command]]\nkey = "prefix+t"\ncommand = "agent-map.toggle"\n'
+        bound = CONFIG + '[[keys.command]]\nkey = "prefix+t"\ncommand = "horchestra.toggle"\n'
         self.assertEqual(install.add_block(bound)[0], bound)
 
     def test_commented_key_does_not_count(self):
         self.assertFalse(install.key_in_use('# key = "prefix+m"\n', "prefix+m"))
+
+
+    def test_pre_rename_block_is_rewritten(self):
+        old = CONFIG + ("\n# >>> herdr-orchestra (managed by agent-map.setup; remove with agent-map.teardown)\n"
+                        "[[keys.command]]\nkey = \"prefix+m\"\ntype = \"plugin_action\"\n"
+                        "command = \"agent-map.toggle\"\ndescription = \"toggle agent map\"\n"
+                        "# <<< herdr-orchestra\n")
+        new, message = install.add_block(old)
+        self.assertIn("updated", message)
+        self.assertIn('command = "horchestra.toggle"', new)
+        self.assertNotIn("agent-map.toggle", new)
+        self.assertEqual(new.count("# >>>"), 1)
+        self.assertEqual(install.strip_block(new).rstrip(), CONFIG.rstrip())
 
 
 class LinkTest(unittest.TestCase):
@@ -32,7 +45,7 @@ class LinkTest(unittest.TestCase):
         home = self.tmp.name
         self.saved = (install.LINKS, install.BIN_DIR)
         install.BIN_DIR = os.path.join(home, "bin")
-        install.LINKS = [("bin/agentmap-team", os.path.join(home, "bin", "agentmap-team")),
+        install.LINKS = [("bin/horchestra-team", os.path.join(home, "bin", "horchestra-team")),
                          ("agents/orchestrator.md", os.path.join(home, "agents", "orchestrator.md"))]
 
     def tearDown(self):
