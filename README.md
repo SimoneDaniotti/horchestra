@@ -131,15 +131,66 @@ session = "a3ff62c9-…"
 | `agentmap-team init` | register the calling agent as orchestrator; open maps |
 | `agentmap-team scan` | list running agents in the space that are not on the team |
 | `agentmap-team adopt <pane> --role R [--task T]` | add a running agent, unchanged |
-| `agentmap-team hire R --kind K --task T` | add a member: new pane in the `team` tab, start the agent, send its brief |
+| `agentmap-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: new pane in the `team` tab, start the agent with its role profile, send its brief |
 | `agentmap-team fire R` | remove a member and close its pane |
 | `agentmap-team status` | show the team |
 | `agentmap-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
+| `agentmap-team roles` | list role profiles in `.orchestra/roles` and who uses them |
 | `agentmap-team up` | start `claude --agent orchestrator` in the current pane (also the `agent-map.team-up` action) |
 
 Team panes are labelled `team:<role>` and their agents are named
 `<project>-<role>` (e.g. `webshop-slides`), so the orchestrator can
 message them with `herdr agent prompt <name> "…"`.
+
+### Role profiles: each member's own instructions and skills
+
+Give a role its own context with a folder in the project:
+
+```text
+.orchestra/roles/slides/
+├── ROLE.md                      # the member's own instructions
+├── CLAUDE.md                    # optional extra memory for this role
+└── .claude/skills/deck-style/   # skills only this role gets
+```
+
+`hire slides` picks the folder up automatically (or `--profile <folder>`),
+and team.toml can add skills to use or block:
+
+```toml
+deny_skills = ["legacy:*"]                 # blocked for every hired member
+
+[[member]]
+role = "slides"
+only_skills = ["slide-kit"]         # allowlist (role-folder skills stay allowed)
+# uses_skills = ["slide-kit"]       # or: skills it must use, others still allowed
+# deny_skills = ["media-kit*"]         # block specific names or patterns
+```
+
+`only_skills` puts "use only these skills" in the member's instructions and
+blocks every other skill found in `~/.claude/skills` and the project's
+`.claude/skills`. Skills from Claude Code plugins and built-ins cannot be
+listed from disk, so for those only the instruction applies.
+
+For a Claude member, hiring generates a session agent
+`.claude/agents/orchestra-<role>.md` (team context + ROLE.md + skills to use)
+and starts it with `claude --agent orchestra-<role> --settings <deny rules>
+--add-dir <profile folder>`. The member still sees the project's own
+CLAUDE.md and skills. Other agent kinds get the same instructions in their
+first message.
+
+What is and is not guaranteed (tested with Claude Code 2.1):
+
+| | |
+| --- | --- |
+| Role instructions | in the member's system prompt; kept by `claude --resume` |
+| Role-only skills | available, from the profile folder |
+| Denied skills | cannot be used (the call is refused), but are still listed |
+| `only_skills` | instruction for all skills; hard block for skills on disk; plugin and built-in skills rely on the instruction |
+| After a Herdr restart | instructions stay; role-only skills and deny rules are lost until the member is re-hired (the orchestrator is told which) |
+
+Check a member from its pane with `/skills` and `/context`; `agentmap-team
+status`, `agentmap-team roles`, and the map's details box show each member's
+profile. Adopted agents keep the context they were started with.
 
 ### Status lines and "needs you"
 
@@ -226,6 +277,8 @@ and `hire` start agents on your machine. Read `install.py` and
 - Files in `~/.claude/agents` are also offered as subagents in every Claude
   session; the orchestrator's description asks Claude not to use it that way.
 - Manually tagged panes (`agentmap-tag`) lose their tags on a Herdr restart.
+- Hiring a Claude member writes `.claude/agents/orchestra-<role>.md` into the
+  project; commit it or add `.claude/agents/orchestra-*.md` to `.gitignore`.
 
 ## Development
 

@@ -14,3 +14,6 @@ First version.
 - Startup hook that repairs teams after a Herdr restart using recorded
   agent session ids.
 - `agent-map.setup` / `agent-map.teardown` for the machine-level pieces.
+- Role profiles (`.orchestra/roles/<role>/`): per-member instructions and
+  role-only skills, plus `only_skills` (allowlist), `uses_skills` and
+  `deny_skills` in team.toml.
