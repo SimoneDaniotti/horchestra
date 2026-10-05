@@ -398,6 +398,9 @@ REPORT_HOWTO = (
     "`agentmap-team report \"<short status, e.g. tests 3/5 passing>\"`. If you "
     "need a decision from the human, run "
     "`agentmap-team report --needs-you \"<the question>\"`, ask it, and stop. "
+    "`report` only updates the map; to tell the orchestrator something (you "
+    "finished, committed, or are blocked), run "
+    "`agentmap-team message orchestrator \"<message>\"`. "
 )
 
 
@@ -969,6 +972,27 @@ def cmd_scan(args):
         print(f"{p['pane_id']:<9}{str(tabs.get(p.get('tab_id'), '')):<20}{p['agent']:<9}{p.get('agent_status', ''):<9}{title}")
 
 
+def cmd_message(args):
+    """Send a message to another team agent by role."""
+    space, me = resolve_space(args.file)
+    target_role = next((r for r in [ORCHESTRATOR] + [m["role"] for m in space.team["member"]]
+                        if r.lower() == args.role.lower()), None)
+    if target_role is None:
+        raise TeamError(f"{args.role} is not on the team (see `agentmap-team status`)")
+    target = space.pane(target_role)
+    if not target or not target.get("agent"):
+        raise TeamError(f"{target_role} has no running agent")
+    if me.get("pane_id") == target["pane_id"]:
+        raise TeamError("that is you")
+    sender = tokens_of(me).get(hc.TOKEN_ROLE) or me.get("agent") or "the human"
+    text = " ".join(" ".join(args.text).split())
+    if not text:
+        raise TeamError("give a message")
+    # agent prompt queues the text even while the target is working.
+    prompt(target["pane_id"], f"[agent-map] message from {sender}: {text}")
+    print(f"sent to {target_role}")
+
+
 def cmd_report(args):
     """Set the calling agent's status line in the agent map."""
     pane_id = caller_pane()
@@ -1108,7 +1132,7 @@ def cmd_status(args):
     rows = [(ORCHESTRATOR, team["orchestrator"].get("kind", "claude"), "")]
     rows += [(m["role"], m.get("kind") or team.get("default_kind", "claude"), m.get("reports_to", "")) for m in team["member"]]
     print(f"team file: {space.team_file}")
-    print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<26}{'PANE':<9}{'STATE':<9}{'REPORTS TO':<12}PROFILE")
+    print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<26}{'PANE':<9}{'STATE':<9}{'REPORTS TO':<12}PROFILE / REPORTED")
     for role, kind, boss in rows:
         pane = space.pane(role) or {}
         name = space.agent_name(role) if pane.get("agent") else "-"
@@ -1116,6 +1140,10 @@ def cmd_status(args):
         member = space.entry(role) if role != ORCHESTRATOR else None
         profile = profile_line(space, member) if member else ""
         print(f"{role:<14}{kind:<9}{name:<26}{pane.get('pane_id', '-'):<9}{state:<9}{boss:<12}{profile}")
+        reported = tokens_of(pane).get(hc.TOKEN_STATUS)
+        if reported:
+            flag = "NEEDS YOU: " if tokens_of(pane).get(hc.TOKEN_NEEDS) else ""
+            print(f"{'':<14}↳ reported: {flag}{reported}")
 
 
 def main(argv=None):
@@ -1137,6 +1165,10 @@ def main(argv=None):
     resp.add_argument("--force", action="store_true", help="even if it is working")
     resp.set_defaults(func=cmd_respawn)
     sub.add_parser("status", help="show the team").set_defaults(func=cmd_status)
+    message = sub.add_parser("message", help="send a message to a team agent by role, e.g. orchestrator")
+    message.add_argument("role")
+    message.add_argument("text", nargs="+")
+    message.set_defaults(func=cmd_message)
     report = sub.add_parser("report", help="set your status line in the agent map (run by members)")
     report.add_argument("text", nargs="*")
     report.add_argument("--needs-you", action="store_true", help="flag that you are waiting on the human")

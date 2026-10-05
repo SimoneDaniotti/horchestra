@@ -59,6 +59,8 @@ restarts the agent in place on the same conversation with its profile.
   agentmap-team respawn <ROLE> | --all
       Restarts a Claude member in place with its current profile, keeping
       its conversation (wait until it is idle).
+  agentmap-team message <ROLE> "<text>"
+      Sends a message to a team agent by role (queued if it is working).
   agentmap-team fire <ROLE>
       Removes the member from team.toml and closes its pane.
   agentmap-team status | scan | sync | roles
@@ -73,11 +75,17 @@ Talking to members (TARGET is the agent name or pane id from `status`):
   herdr agent wait <TARGET> --until done            wait for a member to finish
   herdr agent read <TARGET> --lines 120             read its recent output
 
+Members tell you things with `agentmap-team message orchestrator "…"`; it
+arrives as a prompt starting `[agent-map] message from <role>:`. You can use
+`agentmap-team message <ROLE> "…"` the same way. `agentmap-team status` also
+shows each member's latest reported line.
+
 Members keep their own line in the map with
 `agentmap-team report "<status>"`, and flag questions for the human with
 `agentmap-team report --needs-you "<question>"` (hired members are told this
 in their brief). When you first message an adopted member, tell it about
-these two commands. You can report your own status the same way.
+these commands, including `agentmap-team message orchestrator`. You can
+report your own status the same way.
 
 ## Working rules
 
