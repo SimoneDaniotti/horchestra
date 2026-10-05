@@ -57,5 +57,57 @@ class NameTest(unittest.TestCase):
         self.assertRegex(space.agent_name("QA"), r"^[a-z][a-z0-9_-]{0,31}$")
 
 
+class ReapplyTest(unittest.TestCase):
+    def space(self, terminal):
+        space = team.Space.__new__(team.Space)
+        space.team = {"default_kind": "claude", "orchestrator": {}, "member": []}
+        space.pane = lambda role: {"terminal_id": terminal}
+        return space
+
+    def test_only_restarted_profile_members_are_reapplied(self):
+        st = {"terminals": {"slides": "term_old"}}
+        member = {"role": "slides", "kind": "claude", "profile_applied": True}
+        self.assertTrue(team.needs_reapply(self.space("term_new"), member, st))
+        # Live handoff keeps terminals: nothing to re-apply.
+        self.assertFalse(team.needs_reapply(self.space("term_old"), member, st))
+        # Adopted and never respawned, or not Claude: leave alone.
+        self.assertFalse(team.needs_reapply(self.space("term_new"), {"role": "slides"}, st))
+        codex = dict(member, kind="codex")
+        self.assertFalse(team.needs_reapply(self.space("term_new"), codex, st))
+
+
+class TabNameTest(unittest.TestCase):
+    def test_tab_renamed_only_when_agent_is_alone(self):
+        calls = []
+        orig_quiet = team.hc.call_quiet
+        team.hc.call_quiet = lambda *a, **k: (calls.append(a) or
+            ({"tabs": [{"tab_id": "w1:t1", "label": "1"}, {"tab_id": "w1:t2", "label": "misc"}]}
+             if a[:2] == ("tab", "list") else {}))
+        try:
+            space = team.Space.__new__(team.Space)
+            space.workspace_id = "w1"
+            space.team = {"orchestrator": {}, "member": [{"role": "slides"}, {"role": "qa"}]}
+            panes = {
+                "orchestrator": {"pane_id": "w1:p1", "tab_id": "w1:t1", "agent": "claude"},
+                "slides": {"pane_id": "w1:p2", "tab_id": "w1:t2", "agent": "claude"},
+                "qa": {"pane_id": "w1:p3", "tab_id": "w1:t2", "agent": "claude"},
+            }
+            space.panes = list(panes.values()) + [
+                {"pane_id": "w1:p4", "tab_id": "w1:t1", "agent": None},  # plain shell
+                {"pane_id": "w1:p5", "tab_id": "w1:t1", "agent": None, "tokens": {"agentmap_view": "1"}},
+            ]
+            space.pane = panes.get
+            team.name_tabs(space)
+        finally:
+            team.hc.call_quiet = orig_quiet
+        renames = [c for c in calls if c[:2] == ("tab", "rename")]
+        self.assertEqual(renames, [("tab", "rename", "w1:t1", "orchestrator")])
+
+    def test_name_tabs_can_be_disabled(self):
+        space = team.Space.__new__(team.Space)
+        space.team = {"name_tabs": False}
+        self.assertIsNone(team.name_tabs(space))
+
+
 if __name__ == "__main__":
     unittest.main()
