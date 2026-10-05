@@ -17,7 +17,7 @@ import time
 HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 SOURCE = "agentmap"
 
-# Pane token contract (written by the orchestrator through `agentmap-tag`).
+# Pane token contract (written by the orchestrator through `horchestra-tag`).
 TOKEN_PARENT = "agentmap_parent"  # parent terminal_id (or pane_id)
 TOKEN_ROLE = "agentmap_role"  # short display label, e.g. "FE"
 TOKEN_VIEW = "agentmap_view"  # marks a pane running the map itself

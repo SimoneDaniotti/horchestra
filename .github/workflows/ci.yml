@@ -27,7 +27,7 @@ jobs:
         run: |
           for v in 3.11 3.12 3.13; do
             echo "::group::Python $v"
-            python$v -m py_compile *.py bin/agentmap-team bin/agentmap-tag
+            python$v -m py_compile *.py bin/horchestra-team bin/horchestra-tag
             python$v -W error::ResourceWarning -m unittest discover -s tests -t .
             echo "::endgroup::"
           done
@@ -41,6 +41,6 @@ jobs:
         with:
           python-version: "3.13"
       - name: Compile
-        run: python -m py_compile *.py bin/agentmap-team bin/agentmap-tag
+        run: python -m py_compile *.py bin/horchestra-team bin/horchestra-tag
       - name: Unit tests
         run: python -W error::ResourceWarning -m unittest discover -s tests -t . -v

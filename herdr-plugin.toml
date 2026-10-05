@@ -1,7 +1,7 @@
-id = "agent-map"
-name = "Herdr Orchestra"
+id = "horchestra"
+name = "Horchestra"
 version = "0.1.0"
-min_herdr_version = "0.9.0"
+min_herdr_version = "0.9.3"
 description = "Orchestrator-led agent teams per space, with a live agent map in every tab"
 platforms = ["linux", "macos"]
 
@@ -23,18 +23,18 @@ command = ["python3", "team.py", "up"]
 
 [[actions]]
 id = "setup"
-title = "Set up Herdr Orchestra (commands, orchestrator agent, map key)"
+title = "Set up Horchestra (commands, orchestrator agent, map key)"
 contexts = ["workspace"]
 command = ["python3", "install.py", "install"]
 
 [[actions]]
 id = "teardown"
-title = "Remove what Herdr Orchestra setup added"
+title = "Remove what Horchestra setup added"
 contexts = ["workspace"]
 command = ["python3", "install.py", "teardown"]
 
 [[panes]]
 id = "map"
-title = "Agent map"
+title = "horchestra-map"
 placement = "split"
 command = ["python3", "agentmap.py"]

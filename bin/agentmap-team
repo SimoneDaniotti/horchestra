@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Manage the agent team of the current Herdr space (see team.py)."""
+"""Deprecated alias for horchestra-team (renamed in 0.1); kept for one version."""
 
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
-import team  # noqa: E402
-
-sys.exit(team.main())
+target = os.path.join(os.path.dirname(os.path.realpath(__file__)), "horchestra-team")
+print("note: agentmap-team is now horchestra-team; the old name will be removed", file=sys.stderr)
+os.execv(sys.executable, [sys.executable, target, *sys.argv[1:]])

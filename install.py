@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Install or remove the machine-level parts of Herdr Orchestra.
+"""Install or remove the machine-level parts of Horchestra.
 
 `herdr plugin install` only registers the plugin. This adds what lives
 outside the plugin directory, and `teardown` removes exactly that:
 
-- `agentmap-team` and `agentmap-tag` symlinks in ~/.local/bin
+- `horchestra-team` and `horchestra-tag` symlinks in ~/.local/bin (plus the
+  deprecated `agentmap-team` / `agentmap-tag` aliases, kept for one version)
 - the `orchestrator` Claude Code session agent in ~/.claude/agents
 - a `prefix+m` binding for the map toggle, in a marked block of Herdr's
   config.toml (only if that key is free)
@@ -12,7 +13,7 @@ outside the plugin directory, and `teardown` removes exactly that:
 It never overwrites files it did not create, and only suggests (never
 writes) personal settings such as notifications.
 
-    python3 install.py [install|teardown]    or the agent-map.setup / .teardown actions
+    python3 install.py [install|teardown]    or the horchestra.setup / .teardown actions
 """
 
 import os
@@ -25,14 +26,19 @@ HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 BIN_DIR = os.path.expanduser("~/.local/bin")
 AGENTS_DIR = os.path.expanduser("~/.claude/agents")
 TOGGLE_KEY = "prefix+m"
-TOGGLE_COMMAND = "agent-map.toggle"
-BLOCK_START = "# >>> herdr-orchestra (managed by agent-map.setup; remove with agent-map.teardown)"
-BLOCK_END = "# <<< herdr-orchestra"
+TOGGLE_COMMAND = "horchestra.toggle"
+BLOCK_START = "# >>> horchestra (managed by horchestra.setup; remove with horchestra.teardown)"
+BLOCK_END = "# <<< horchestra"
+# Any managed block, including ones written under the pre-0.1 names.
+BLOCK_RE = re.compile(r"# >>> (?:horchestra|herdr-orchestra)\b.*?# <<< (?:horchestra|herdr-orchestra)[^\n]*\n?", re.S)
+LEGACY_TOGGLE_COMMANDS = ("agent-map.toggle",)
 
 # (source relative to the plugin root, destination)
 LINKS = [
-    ("bin/agentmap-team", os.path.join(BIN_DIR, "agentmap-team")),
-    ("bin/agentmap-tag", os.path.join(BIN_DIR, "agentmap-tag")),
+    ("bin/horchestra-team", os.path.join(BIN_DIR, "horchestra-team")),
+    ("bin/horchestra-tag", os.path.join(BIN_DIR, "horchestra-tag")),
+    ("bin/agentmap-team", os.path.join(BIN_DIR, "agentmap-team")),  # deprecated alias
+    ("bin/agentmap-tag", os.path.join(BIN_DIR, "agentmap-tag")),  # deprecated alias
     ("agents/orchestrator.md", os.path.join(AGENTS_DIR, "orchestrator.md")),
 ]
 
@@ -80,7 +86,7 @@ def install_links(report):
         os.symlink(source, dest)
         report(f"linked   {dest} -> {source}")
     if BIN_DIR not in os.environ.get("PATH", "").split(os.pathsep):
-        report(f"NOTE     {BIN_DIR} is not on your PATH; add it so agents can run agentmap-team")
+        report(f"NOTE     {BIN_DIR} is not on your PATH; add it so agents can run horchestra-team")
 
 
 def remove_links(report):
@@ -108,8 +114,7 @@ def managed_block():
 
 
 def strip_block(text):
-    pattern = re.compile(re.escape(BLOCK_START) + r".*?" + re.escape(BLOCK_END) + r"\n?", re.S)
-    return pattern.sub("", text)
+    return BLOCK_RE.sub("", text)
 
 
 def active_lines(text):
@@ -122,14 +127,20 @@ def key_in_use(text, key):
 
 
 def toggle_bound_elsewhere(text):
-    return any(re.fullmatch(r'command\s*=\s*"' + re.escape(TOGGLE_COMMAND) + '"', l)
+    commands = (TOGGLE_COMMAND,) + LEGACY_TOGGLE_COMMANDS
+    return any(re.fullmatch(r'command\s*=\s*"(' + "|".join(map(re.escape, commands)) + ')"', l)
                for l in active_lines(text))
 
 
 def add_block(text):
     """Return (new_text, message). Pure, for tests."""
-    if BLOCK_START in text:
+    if managed_block() in text:
         return text, f"ok       {TOGGLE_KEY} binding already managed by setup"
+    if BLOCK_RE.search(text):
+        # A block from an older version: rewrite it with the current names.
+        stripped = strip_block(text)
+        new, _ = add_block(stripped)
+        return new, f"updated  {TOGGLE_KEY} binding to the current plugin name"
     if toggle_bound_elsewhere(text):
         return text, "ok       the map toggle is already bound in your config"
     if key_in_use(text, TOGGLE_KEY):
@@ -208,8 +219,8 @@ def main(argv):
     elif command == "teardown":
         remove_links(report)
         remove_binding(report)
-        report("done. team.toml files in your projects and ~/.local/state/herdr-agent-map "
-               "were left in place; `herdr plugin uninstall agent-map` removes the plugin.")
+        report("done. team.toml files in your projects and ~/.local/state/horchestra "
+               "were left in place; `herdr plugin uninstall horchestra` removes the plugin.")
     else:
         print(__doc__)
         return 2

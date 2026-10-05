@@ -2,7 +2,7 @@
 """Agent map pane: an interactive view of the agents in this workspace.
 
 Runs as a Herdr plugin pane. Parent/child edges come from pane tokens written
-by `agentmap-team` (or `agentmap-tag`); untagged agents are listed as roots.
+by `horchestra-team` (or `horchestra-tag`); untagged agents are listed as roots.
 Three views (compact rows, cards, top-down graph) live in views.py; this
 module owns data, input, the details box, and drawing to curses.
 """

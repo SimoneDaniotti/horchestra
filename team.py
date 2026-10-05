@@ -3,7 +3,7 @@
 
 team.toml is the single source of truth for a space's team. It starts with
 only an orchestrator; the orchestrator grows and shrinks the team with
-`agentmap-team hire/fire`, or edits the file and runs `agentmap-team sync`.
+`horchestra-team hire/fire`, or edits the file and runs `horchestra-team sync`.
 
 Each member's agent session id is recorded in team.toml. Herdr persists
 those ids and resumes the same sessions after a server restart, so `restore`
@@ -38,9 +38,23 @@ START_TIMEOUT_MS = 90000
 READY_WAIT_MS = 300000
 RESTORE_SECONDS = 1800
 IDLE_TEAM_SECONDS = 300
-STATE_DIR = os.environ.get("AGENTMAP_STATE_DIR") or os.path.expanduser(
-    "~/.local/state/herdr-agent-map"
-)
+LEGACY_STATE_DIR = os.path.expanduser("~/.local/state/herdr-agent-map")
+
+
+def _state_dir():
+    explicit = os.environ.get("HORCHESTRA_STATE_DIR") or os.environ.get("AGENTMAP_STATE_DIR")
+    if explicit:
+        return explicit
+    path = os.path.expanduser("~/.local/state/horchestra")
+    if not os.path.exists(path) and os.path.isdir(LEGACY_STATE_DIR):
+        try:
+            os.rename(LEGACY_STATE_DIR, path)  # one-time move from the pre-0.1 name
+        except OSError:
+            return LEGACY_STATE_DIR
+    return path
+
+
+STATE_DIR = _state_dir()
 REGISTRY = os.path.join(STATE_DIR, "teams.json")
 TERMINALS = os.path.join(STATE_DIR, "terminals.json")
 AGENT_FILE = os.path.expanduser("~/.claude/agents/orchestrator.md")
@@ -126,9 +140,9 @@ def _table(lines, header, table):
 
 def dump(team):
     lines = [
-        "# Agent team for this space, managed by `agentmap-team`.",
+        "# Agent team for this space, managed by `horchestra-team`.",
         "# The orchestrator hires and fires members; edit by hand, then run",
-        "# `agentmap-team sync` to apply.",
+        "# `horchestra-team sync` to apply.",
         "",
     ]
     for key, value in team.items():
@@ -272,7 +286,7 @@ def resolve_space(team_file=None, create=False):
     if not workspace:
         raise TeamError("run this inside a Herdr pane (no workspace context)")
     cwd = pane.get("foreground_cwd") or pane.get("cwd") or os.getcwd()
-    path = team_file or os.environ.get("AGENTMAP_TEAM_FILE")
+    path = team_file or os.environ.get("HORCHESTRA_TEAM_FILE") or os.environ.get("AGENTMAP_TEAM_FILE")
     # Plugin actions run from the plugin root, so only trust the shell cwd
     # when invoked from a terminal (e.g. by the orchestrator).
     if not path and not os.environ.get("HERDR_PLUGIN_ID"):
@@ -280,7 +294,7 @@ def resolve_space(team_file=None, create=False):
     path = path or find_team_file(cwd)
     if not path:
         if not create:
-            raise TeamError(f"no {TEAM_FILE} found from {cwd}; run `agentmap-team up` first")
+            raise TeamError(f"no {TEAM_FILE} found from {cwd}; run `horchestra-team up` first")
         path = os.path.join(project_root(cwd), TEAM_FILE)
         save(path, new_team())
     path = os.path.abspath(path)
@@ -321,7 +335,7 @@ def wait_until_ready(name, pane_id, log=print):
         return hc.call("agent", "wait", name, "--until", "idle", "--until", "done",
                        "--timeout", str(READY_WAIT_MS), timeout=READY_WAIT_MS / 1000 + 10)
     except hc.HerdrError as exc:
-        raise TeamError(f"{name} is still not ready; answer its prompt, then run `agentmap-team sync`") from exc
+        raise TeamError(f"{name} is still not ready; answer its prompt, then run `horchestra-team sync`") from exc
 
 
 def prompt(target, text):
@@ -395,12 +409,12 @@ def load_profile(space, member):
 
 REPORT_HOWTO = (
     "Keep the human's agent map current: at each milestone run "
-    "`agentmap-team report \"<short status, e.g. tests 3/5 passing>\"`. If you "
+    "`horchestra-team report \"<short status, e.g. tests 3/5 passing>\"`. If you "
     "need a decision from the human, run "
-    "`agentmap-team report --needs-you \"<the question>\"`, ask it, and stop. "
+    "`horchestra-team report --needs-you \"<the question>\"`, ask it, and stop. "
     "`report` only updates the map; to tell the orchestrator something (you "
     "finished, committed, or are blocked), run "
-    "`agentmap-team message orchestrator \"<message>\"`. "
+    "`horchestra-team message orchestrator \"<message>\"`. "
 )
 
 
@@ -677,20 +691,20 @@ def needs_reapply(space, member, st):
 
 
 RESUME_NOTE = (
-    "[agent-map] Herdr restarted and resumed this session. {missing}Run "
-    "`agentmap-team status` before continuing; do not redo finished work."
+    "[horchestra] Herdr restarted and resumed this session. {missing}Run "
+    "`horchestra-team status` before continuing; do not redo finished work."
 )
 
 FRESH_NOTE = (
-    "[agent-map] Herdr restarted and your previous orchestrator conversation "
+    "[horchestra] Herdr restarted and your previous orchestrator conversation "
     "could not be resumed, so you are a fresh orchestrator for the existing "
-    "team in team.toml. {missing}Run `agentmap-team status`, read members' "
+    "team in team.toml. {missing}Run `horchestra-team status`, read members' "
     "recent output with `herdr agent read`, and continue coordinating."
 )
 
 RESUMED_GRACE_SECONDS = 45  # once some agents resumed, wait this long for the rest
 UNRESUMED_GRACE_SECONDS = 180  # when nothing resumed yet (client may attach late)
-MAP_LABEL = "Agent map"
+MAP_LABELS = ("horchestra-map", "Agent map")  # current and pre-0.1 pane titles
 
 
 def is_live(pane):
@@ -802,7 +816,7 @@ def finish_restore(space, live, st, log=print):
     if failed:
         note += (f"Could not re-apply role profiles to: {', '.join(failed)} (they run "
                  "without their role instructions and skill rules; try "
-                 "`agentmap-team respawn <role>`). ")
+                 "`horchestra-team respawn <role>`). ")
     if ORCHESTRATOR not in live:
         log("orchestrator did not resume; starting a fresh one")
         try:
@@ -857,7 +871,7 @@ def replace_dead_maps(space, log=print):
     space.refresh()
     dead = [
         p["pane_id"] for p in space.panes
-        if p.get("label") == MAP_LABEL and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW)
+        if p.get("label") in MAP_LABELS and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW)
     ]
     if not dead:
         return
@@ -873,7 +887,7 @@ def cmd_up(args):
     space, pane = resolve_space(args.file, create=True)
     orch = space.pane(ORCHESTRATOR)
     needs_start = orch is None or not orch.get("agent")
-    if (needs_start and not os.environ.get("HERDR_PLUGIN_ID") and not os.environ.get("AGENTMAP_DETACHED")
+    if (needs_start and not os.environ.get("HERDR_PLUGIN_ID") and not os.environ.get("HORCHESTRA_DETACHED")
             and pane.get("pane_id") and not pane.get("agent") and (orch is None or orch["pane_id"] == pane["pane_id"])):
         # Run from the very shell the orchestrator should take over: that
         # shell is busy running us, so finish in the background and return.
@@ -896,7 +910,7 @@ def detach_up(args, space):
         argv.append("--no-map")
     with open(log_path, "a") as log:
         subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                         start_new_session=True, env={**os.environ, "AGENTMAP_DETACHED": "1"})
+                         start_new_session=True, env={**os.environ, "HORCHESTRA_DETACHED": "1"})
     print(f"starting the orchestrator in this pane… (team: {space.team_file}, log: {log_path})")
 
 
@@ -933,7 +947,7 @@ def cmd_init(args):
     """Register the calling agent session as this space's orchestrator."""
     space, me = resolve_space(args.file, create=True)
     if not me.get("pane_id") or not me.get("agent"):
-        raise TeamError("run `agentmap-team init` from the orchestrator's own agent session")
+        raise TeamError("run `horchestra-team init` from the orchestrator's own agent session")
     team = space.team
     current = space.pane(ORCHESTRATOR)
     if current and current["pane_id"] != me["pane_id"]:
@@ -978,7 +992,7 @@ def cmd_message(args):
     target_role = next((r for r in [ORCHESTRATOR] + [m["role"] for m in space.team["member"]]
                         if r.lower() == args.role.lower()), None)
     if target_role is None:
-        raise TeamError(f"{args.role} is not on the team (see `agentmap-team status`)")
+        raise TeamError(f"{args.role} is not on the team (see `horchestra-team status`)")
     target = space.pane(target_role)
     if not target or not target.get("agent"):
         raise TeamError(f"{target_role} has no running agent")
@@ -989,7 +1003,7 @@ def cmd_message(args):
     if not text:
         raise TeamError("give a message")
     # agent prompt queues the text even while the target is working.
-    prompt(target["pane_id"], f"[agent-map] message from {sender}: {text}")
+    prompt(target["pane_id"], f"[horchestra] message from {sender}: {text}")
     print(f"sent to {target_role}")
 
 
@@ -997,7 +1011,7 @@ def cmd_report(args):
     """Set the calling agent's status line in the agent map."""
     pane_id = caller_pane()
     if not pane_id:
-        raise TeamError("run `agentmap-team report` inside a Herdr pane")
+        raise TeamError("run `horchestra-team report` inside a Herdr pane")
     if args.clear:
         hc.set_tokens(pane_id, clear=[hc.TOKEN_STATUS, hc.TOKEN_NEEDS])
         print("status cleared")
@@ -1044,7 +1058,7 @@ def cmd_respawn(args):
     if not roles_wanted or roles_wanted == [None]:
         raise TeamError("give a role, or --all")
     targets = {(space.pane(r) or {}).get("pane_id") for r in roles_wanted}
-    if me.get("pane_id") in targets and not os.environ.get("AGENTMAP_DETACHED"):
+    if me.get("pane_id") in targets and not os.environ.get("HORCHESTRA_DETACHED"):
         # Respawning the agent that runs this command: finish in the background.
         import subprocess
 
@@ -1055,7 +1069,7 @@ def cmd_respawn(args):
         os.makedirs(STATE_DIR, exist_ok=True)
         with open(log_path, "a") as log:
             subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                             start_new_session=True, env={**os.environ, "AGENTMAP_DETACHED": "1"})
+                             start_new_session=True, env={**os.environ, "HORCHESTRA_DETACHED": "1"})
         print(f"respawning in the background (this session will restart); log: {log_path}")
         return
     for role in roles_wanted:
@@ -1132,14 +1146,15 @@ def cmd_status(args):
     rows = [(ORCHESTRATOR, team["orchestrator"].get("kind", "claude"), "")]
     rows += [(m["role"], m.get("kind") or team.get("default_kind", "claude"), m.get("reports_to", "")) for m in team["member"]]
     print(f"team file: {space.team_file}")
-    print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<26}{'PANE':<9}{'STATE':<9}{'REPORTS TO':<12}PROFILE / REPORTED")
+    name_w = max([26] + [len(space.agent_name(r)) + 2 for r, _, _ in rows])
+    print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<{name_w}}{'PANE':<9}{'STATE':<9}{'REPORTS TO':<12}PROFILE / REPORTED")
     for role, kind, boss in rows:
         pane = space.pane(role) or {}
         name = space.agent_name(role) if pane.get("agent") else "-"
         state = pane.get("agent_status", "missing") if pane else "missing"
         member = space.entry(role) if role != ORCHESTRATOR else None
         profile = profile_line(space, member) if member else ""
-        print(f"{role:<14}{kind:<9}{name:<26}{pane.get('pane_id', '-'):<9}{state:<9}{boss:<12}{profile}")
+        print(f"{role:<14}{kind:<9}{name:<{name_w}}{pane.get('pane_id', '-'):<9}{state:<9}{boss:<12}{profile}")
         reported = tokens_of(pane).get(hc.TOKEN_STATUS)
         if reported:
             flag = "NEEDS YOU: " if tokens_of(pane).get(hc.TOKEN_NEEDS) else ""
@@ -1147,7 +1162,7 @@ def cmd_status(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="agentmap-team", description="Manage this space's agent team (team.toml).")
+    parser = argparse.ArgumentParser(prog="horchestra-team", description="Manage this space's agent team (team.toml).")
     parser.add_argument("--file", help="path to team.toml (default: search upward from cwd)")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1207,7 +1222,7 @@ def main(argv=None):
     try:
         args.func(args)
     except (TeamError, hc.HerdrError) as exc:
-        print(f"agentmap-team: {exc}", file=sys.stderr)
+        print(f"horchestra-team: {exc}", file=sys.stderr)
         return 1
     return 0
 

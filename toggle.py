@@ -2,7 +2,7 @@
 """Toggle the agent map pane in the invoking workspace.
 
 Closes any map pane already in the workspace; otherwise opens one docked at
-the left edge of the active tab and narrows it to AGENTMAP_WIDTH columns
+the left edge of the active tab and narrows it to HORCHESTRA_WIDTH columns
 (default 32, configurable in $HERDR_PLUGIN_CONFIG_DIR/width).
 """
 
@@ -35,7 +35,7 @@ def find(ctx, *keys):
 
 def target_width():
     config_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
-    raw = os.environ.get("AGENTMAP_WIDTH")
+    raw = os.environ.get("HORCHESTRA_WIDTH") or os.environ.get("AGENTMAP_WIDTH")
     if not raw and config_dir:
         try:
             with open(os.path.join(config_dir, "width")) as fh:
@@ -61,9 +61,12 @@ def rects(layout):
     }
 
 
+MAP_LABELS = ("horchestra-map", "Agent map")  # current and pre-0.1 pane titles
+
+
 def is_map(pane):
     """Live maps carry a token; maps restored as shells keep only the label."""
-    return bool((pane.get("tokens") or {}).get(hc.TOKEN_VIEW) or pane.get("label") == "Agent map")
+    return bool((pane.get("tokens") or {}).get(hc.TOKEN_VIEW) or pane.get("label") in MAP_LABELS)
 
 
 def map_panes(panes):
@@ -106,7 +109,7 @@ def open_map(panes, focused):
     # Note: herdr 0.9.x rejects --workspace together with --target-pane.
     opened = hc.call(
         "plugin", "pane", "open",
-        "--plugin", os.environ.get("HERDR_PLUGIN_ID", "agent-map"),
+        "--plugin", os.environ.get("HERDR_PLUGIN_ID", "horchestra"),
         "--entrypoint", "map",
         "--placement", "split",
         "--target-pane", anchor,
@@ -145,7 +148,7 @@ def main():
     if not workspace and focused:
         workspace = hc.get_pane(focused).get("workspace_id")
     if not workspace:
-        print("agent-map: no workspace context", file=sys.stderr)
+        print("horchestra: no workspace context", file=sys.stderr)
         return 1
 
     panes = hc.list_panes(workspace)
@@ -168,5 +171,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except hc.HerdrError as exc:
-        print(f"agent-map: {exc}", file=sys.stderr)
+        print(f"horchestra: {exc}", file=sys.stderr)
         sys.exit(1)
