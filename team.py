@@ -22,6 +22,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 import herdr_client as hc  # noqa: E402
+import roles  # noqa: E402
 
 try:
     import tomllib
@@ -352,17 +353,28 @@ def new_member_pane(space, cwd):
     return created["root_pane"]["pane_id"]
 
 
-def member_brief(space, member):
+def team_context(space, role):
+    """Standing member instructions (a Claude member's session agent holds them)."""
     return (
-        f"You are the {member['role']} member of an agent team in this Herdr space, "
+        f"You are the {role} member of an agent team in this Herdr space, "
         f"coordinated by an orchestrator agent (Herdr agent "
-        f"`{space.agent_name(ORCHESTRATOR)}`). Your brief:\n\n"
-        f"{member.get('task') or '(wait for instructions from the orchestrator)'}\n\n"
-        "Work only on your brief and do not edit team.toml. "
+        f"`{space.agent_name(ORCHESTRATOR)}`). Work only on your brief and do not "
+        "edit team.toml. "
         + REPORT_HOWTO
         + "When you finish, end with a short summary of what you changed and "
         "anything the orchestrator must know."
     )
+
+
+def member_brief(member):
+    return "Your brief:\n\n" + (member.get("task") or "(wait for instructions from the orchestrator)")
+
+
+def load_profile(space, member):
+    try:
+        return roles.load(space.root, space.team, member)
+    except roles.RoleError as exc:
+        raise TeamError(str(exc)) from exc
 
 
 REPORT_HOWTO = (
@@ -425,8 +437,18 @@ def spawn_member(space, team, member):
     else:
         pane_id = pane["pane_id"]
     kind = member.get("kind") or team.get("default_kind", "claude")
-    start_agent(space.agent_name(role), kind, pane_id, [str(a) for a in member.get("args", [])])
-    prompt(pane_id, member_brief(space, member))
+    profile = load_profile(space, member)
+    context = team_context(space, role)
+    args = [str(a) for a in member.get("args", [])]
+    if kind == "claude":
+        # Profile -> session agent (+ role skills dir, deny settings).
+        args = roles.claude_args(space.root, STATE_DIR, space.agent_name(role), profile, context) + args
+        brief = member_brief(member)
+    else:
+        # Other agents get the same instructions in their first message.
+        brief = roles.agent_body(profile, context) + "\n" + member_brief(member)
+    start_agent(space.agent_name(role), kind, pane_id, args)
+    prompt(pane_id, brief)
     return wait_for_session(space, pane_id)
 
 
@@ -517,7 +539,7 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
         adopt(space, role, pane, log=log)
         refs[role] = pane.get("terminal_id") or pane["pane_id"]
         parent = refs.get(member.get("reports_to")) or refs.get(ORCHESTRATOR)
-        tokens = {hc.TOKEN_ROLE: role}
+        tokens = {hc.TOKEN_ROLE: role, hc.TOKEN_PROFILE: profile_line(space, member)}
         if member.get("task"):
             tokens[hc.TOKEN_TASK] = " ".join(str(member["task"]).split())[:80]
         if parent:
@@ -537,6 +559,26 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
     for label, pane in space.by_label.items():
         if label.startswith(LABEL_PREFIX) and pane["pane_id"] not in known:
             log(f"note: pane {label} is not in team.toml (fire it or add it back)")
+
+
+def profile_line(space, member):
+    try:
+        line = roles.load(space.root, space.team, member).summary()
+    except roles.RoleError as exc:
+        line = f"profile error: {exc}"
+    if member.get("adopted"):
+        line += " · not applied (adopted)"
+    return line[:80]
+
+
+def profile_lost_on_resume(space, member):
+    """Role skills and deny rules come from flags `claude --resume` drops."""
+    try:
+        profile = roles.load(space.root, space.team, member)
+    except roles.RoleError:
+        return False
+    kind = member.get("kind") or space.team.get("default_kind", "claude")
+    return kind == "claude" and not member.get("adopted") and bool(profile.own_skills or profile.all_denied)
 
 
 RESUME_NOTE = (
@@ -649,6 +691,12 @@ def finish_restore(space, live, st, log=print):
         f"re-hire them if still needed): {', '.join(missing)}. "
         if missing else ""
     )
+    degraded = [m["role"] for m in team["member"]
+                if m["role"] in live and profile_lost_on_resume(space, m)]
+    if degraded:
+        note += (f"Resumed without their role-only skills and skill deny rules "
+                 f"(instructions kept): {', '.join(degraded)}; fire and re-hire them "
+                 "if they need those. ")
     if ORCHESTRATOR not in live:
         log("orchestrator did not resume; starting a fresh one")
         try:
@@ -753,7 +801,7 @@ def cmd_adopt(args):
         raise TeamError(f"pane {args.pane} has no running agent; use `hire` instead")
     if any(m["role"].lower() == args.role.lower() for m in team["member"]):
         raise TeamError(f"{args.role} is already on the team")
-    member = {"role": args.role, "kind": pane["agent"],
+    member = {"role": args.role, "kind": pane["agent"], "adopted": True,
               "task": args.task or "(adopted with its existing conversation)"}
     if args.reports_to:
         member["reports_to"] = args.reports_to
@@ -842,6 +890,21 @@ def tokens_of(pane):
     return tokens if isinstance(tokens, dict) else {}
 
 
+def cmd_roles(args):
+    """List role profiles in this project and who uses them."""
+    space, _ = resolve_space(args.file, create=True)
+    names = roles.list_profiles(space.root)
+    print(f"profiles in {roles.roles_root(space.root)}:")
+    if not names:
+        print("  (none) create .orchestra/roles/<role>/ROLE.md to add one")
+    for name in names:
+        folder = os.path.join(roles.roles_root(space.root), name)
+        users = [m["role"] for m in space.team["member"] if (m.get("profile") or m["role"]) == name]
+        has_md = "ROLE.md" if os.path.isfile(os.path.join(folder, "ROLE.md")) else "no ROLE.md"
+        skills = roles.skills_in(folder)
+        print(f"  {name:<16}{has_md:<12}skills: {', '.join(skills) or '-':<30} used by: {', '.join(users) or '-'}")
+
+
 def cmd_sync(args):
     space, pane = resolve_space(args.file)
     sync(space, near_pane=pane)
@@ -863,6 +926,15 @@ def cmd_hire(args):
         member["cwd"] = args.cwd
     if args.arg:
         member["args"] = args.arg
+    if args.profile:
+        member["profile"] = args.profile
+    if args.uses_skill:
+        member["uses_skills"] = args.uses_skill
+    if args.deny_skill:
+        member["deny_skills"] = args.deny_skill
+    if args.only_skill:
+        member["only_skills"] = args.only_skill
+    load_profile(space, member)  # fail before touching team.toml
     before = dump(team)
     team["member"].append(member)
     save(space.team_file, team)
@@ -899,12 +971,14 @@ def cmd_status(args):
     rows = [(ORCHESTRATOR, team["orchestrator"].get("kind", "claude"), "")]
     rows += [(m["role"], m.get("kind") or team.get("default_kind", "claude"), m.get("reports_to", "")) for m in team["member"]]
     print(f"team file: {space.team_file}")
-    print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<26}{'PANE':<9}{'STATE':<9}REPORTS TO")
+    print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<26}{'PANE':<9}{'STATE':<9}{'REPORTS TO':<12}PROFILE")
     for role, kind, boss in rows:
         pane = space.pane(role) or {}
         name = space.agent_name(role) if pane.get("agent") else "-"
         state = pane.get("agent_status", "missing") if pane else "missing"
-        print(f"{role:<14}{kind:<9}{name:<26}{pane.get('pane_id', '-'):<9}{state:<9}{boss}")
+        member = space.entry(role) if role != ORCHESTRATOR else None
+        profile = profile_line(space, member) if member else ""
+        print(f"{role:<14}{kind:<9}{name:<26}{pane.get('pane_id', '-'):<9}{state:<9}{boss:<12}{profile}")
 
 
 def main(argv=None):
@@ -919,6 +993,7 @@ def main(argv=None):
     sub.add_parser("init", help="register the calling agent as this space's orchestrator").set_defaults(func=cmd_init)
     sub.add_parser("scan", help="list running agents in this space that are not on the team").set_defaults(func=cmd_scan)
     sub.add_parser("sync", help="apply team.toml: start missing members, repair tags").set_defaults(func=cmd_sync)
+    sub.add_parser("roles", help="list role profiles (.orchestra/roles) and who uses them").set_defaults(func=cmd_roles)
     sub.add_parser("status", help="show the team").set_defaults(func=cmd_status)
     report = sub.add_parser("report", help="set your status line in the agent map (run by members)")
     report.add_argument("text", nargs="*")
@@ -936,6 +1011,11 @@ def main(argv=None):
     hire.add_argument("--reports-to", help="parent role (default: orchestrator)")
     hire.add_argument("--cwd", help="working dir relative to team.toml")
     hire.add_argument("--arg", action="append", help="extra agent CLI arg (repeatable)")
+    hire.add_argument("--profile", help="role profile folder in .orchestra/roles (default: the role's own)")
+    hire.add_argument("--uses-skill", action="append", help="skill the member must use (repeatable)")
+    hire.add_argument("--deny-skill", action="append", help="skill name or pattern to block (repeatable)")
+    hire.add_argument("--only-skill", action="append",
+                      help="allowlist: the member may use only these skills (repeatable)")
     hire.set_defaults(func=cmd_hire)
 
     adopt_p = sub.add_parser("adopt", help="add an already running agent to the team (no restart)")

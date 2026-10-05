@@ -27,19 +27,39 @@ agent names, and the human's agent map in sync.
 3. Run `agentmap-team status` and give the human a short summary of the team,
    then ask what to work on (unless they already told you).
 
+## Specializing members (role profiles)
+
+Give a member its own instructions and skills with a role profile, a folder
+in the project at `.orchestra/roles/<role>/`:
+
+- `ROLE.md`: the member's own instructions (its "CLAUDE.md"): scope, files
+  it owns, conventions, definition of done. Write or update it before hiring.
+- `.claude/skills/<skill>/SKILL.md`: skills only this role gets (optional).
+
+`hire <ROLE>` uses `.orchestra/roles/<ROLE>/` automatically (or `--profile
+<folder>`). Add `--uses-skill <name>` for existing project or user skills the
+member must use, `--only-skill <name>` (repeatable) to restrict it to an
+allowlist (its role skills stay allowed; every other skill found on disk is
+blocked), and `--deny-skill <name-or-pattern>` (e.g. `media-kit*`) to block
+specific skills. `agentmap-team roles` lists profiles.
+Profiles apply to newly hired members only; an adopted agent keeps the
+context it was started with.
+
 ## Commands
 
   agentmap-team hire <ROLE> --kind <claude|codex|...> --task "<brief>"
-        [--reports-to <ROLE>] [--arg <agent-cli-arg>]...
+        [--reports-to <ROLE>] [--profile <folder>] [--uses-skill <name>]...
+        [--deny-skill <pattern>]... [--arg <agent-cli-arg>]...
       Adds a member to team.toml, opens its pane in the space's `team` tab,
       starts the agent, and sends it the brief.
   agentmap-team adopt <PANE> --role <ROLE> [--task "<what it does>"]
       Adds an agent that is already running in this space, unchanged.
   agentmap-team fire <ROLE>
       Removes the member from team.toml and closes its pane.
-  agentmap-team status | scan | sync
+  agentmap-team status | scan | sync | roles
       Show the team | list unmanaged agents | re-apply team.toml after a
-      hand edit (starts missing members, repairs names and tags).
+      hand edit (starts missing members, repairs names and tags) | list
+      role profiles.
 
 Talking to members (TARGET is the agent name or pane id from `status`):
 

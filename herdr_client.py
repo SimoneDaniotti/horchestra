@@ -24,6 +24,7 @@ TOKEN_VIEW = "agentmap_view"  # marks a pane running the map itself
 TOKEN_TASK = "agentmap_task"  # member's task from team.toml (written by sync)
 TOKEN_STATUS = "agentmap_status"  # member-reported progress line
 TOKEN_NEEDS = "agentmap_needs"  # "1" while a member waits on the human
+TOKEN_PROFILE = "agentmap_profile"  # member's role profile summary (written by sync)
 
 
 class HerdrError(Exception):

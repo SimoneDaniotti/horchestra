@@ -350,6 +350,8 @@ class App:
             fields.append(("status", tokens[hc.TOKEN_STATUS], "name"))
         if tokens.get(hc.TOKEN_TASK):
             fields.append(("task", tokens[hc.TOKEN_TASK], None))
+        if tokens.get(hc.TOKEN_PROFILE):
+            fields.append(("role", tokens[hc.TOKEN_PROFILE], None))
         message = self.message_for(node.key)
         if message:
             fields.append(("last", message, None))
