@@ -1,4 +1,4 @@
-# Herdr Orchestra
+# Horchestra
 
 Orchestrator-led agent teams for [Herdr](https://herdr.dev), with a live
 agent map in every tab.
@@ -29,27 +29,31 @@ the agents in the tab you are looking at are highlighted.
 
 ## Requirements
 
-- Herdr 0.9 or newer, on macOS or Linux
+- Herdr 0.9.3 or newer, on macOS or Linux (Windows is not supported yet)
 - Python 3.11+ (standard library only; nothing to install)
-- Claude Code for the `orchestrator` session agent; members can be any agent
-  Herdr can start (`claude`, `codex`, `gemini`, `pi`, …)
+- Claude Code 2.1 or newer for the orchestrator and for role profiles,
+  `respawn`, and session names (tested with 2.1.289); members can be any
+  agent Herdr can start (`claude`, `codex`, `gemini`, `pi`, …)
+- Herdr's Claude/Codex integrations, so Herdr can resume agents after a
+  restart (`herdr integration install claude`)
 
 ## Install
 
 ```bash
-herdr plugin install SimoneDaniotti/herdr-orchestra
-herdr plugin action invoke agent-map.setup
+herdr plugin install SimoneDaniotti/horchestra
+herdr plugin action invoke horchestra.setup
 ```
 
-For a private repository, `plugin install` clones with your own git
-credentials, so you need read access to the repo.
+`plugin install` clones over HTTPS with your own git credentials. For a
+private repository you need read access and a git credential helper for
+GitHub; with the GitHub CLI, `gh auth setup-git` sets that up.
 
 `setup` adds the pieces that live outside the plugin directory, and prints
 what it did:
 
 | What | Where |
 | --- | --- |
-| `agentmap-team`, `agentmap-tag` commands | symlinks in `~/.local/bin` |
+| `horchestra-team`, `horchestra-tag` commands | symlinks in `~/.local/bin` |
 | `orchestrator` Claude Code session agent | symlink in `~/.claude/agents` |
 | `prefix+m` toggles the maps | marked block in `~/.config/herdr/config.toml`, only if the key is free |
 
@@ -68,8 +72,8 @@ claude --agent orchestrator
 Then tell it what you want, or just "set up the team". On its first turn it:
 
 1. registers itself as the space's orchestrator and creates `team.toml` at
-   the project's git root (`agentmap-team init`)
-2. finds agents already running in the space (`agentmap-team scan`) and adopts
+   the project's git root (`horchestra-team init`)
+2. finds agents already running in the space (`horchestra-team scan`) and adopts
    them, naming roles after their tabs, without restarting or messaging them
 3. opens a map in every agent tab and summarizes the team
 
@@ -128,22 +132,22 @@ session = "a3ff62c9-…"
 
 | Command | What it does |
 | --- | --- |
-| `agentmap-team init` | register the calling agent as orchestrator; open maps |
-| `agentmap-team scan` | list running agents in the space that are not on the team |
-| `agentmap-team adopt <pane> --role R [--task T]` | add a running agent, unchanged |
-| `agentmap-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: own tab named after the role, start the agent with its role profile, send its brief |
-| `agentmap-team fire R` | remove a member and close its pane |
-| `agentmap-team status` | show the team, with each member's latest reported line |
-| `agentmap-team message R "text"` | send a message to a team agent by role (e.g. `orchestrator`); queued if it is busy |
-| `agentmap-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
-| `agentmap-team roles` | list role profiles in `.orchestra/roles` and who uses them |
-| `agentmap-team respawn R \| --all` | restart a Claude agent in place with its current profile, keeping its conversation |
-| `agentmap-team up` | start `claude --agent orchestrator` in the current pane (also the `agent-map.team-up` action) |
+| `horchestra-team init` | register the calling agent as orchestrator; open maps |
+| `horchestra-team scan` | list running agents in the space that are not on the team |
+| `horchestra-team adopt <pane> --role R [--task T]` | add a running agent, unchanged |
+| `horchestra-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: own tab named after the role, start the agent with its role profile, send its brief |
+| `horchestra-team fire R` | remove a member and close its pane |
+| `horchestra-team status` | show the team, with each member's latest reported line |
+| `horchestra-team message R "text"` | send a message to a team agent by role (e.g. `orchestrator`); queued if it is busy |
+| `horchestra-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
+| `horchestra-team roles` | list role profiles in `.orchestra/roles` and who uses them |
+| `horchestra-team respawn R \| --all` | restart a Claude agent in place with its current profile, keeping its conversation |
+| `horchestra-team up` | start `claude --agent orchestrator` in the current pane (also the `horchestra.team-up` action) |
 
 Names stay in step with roles:
 
 - each hired member gets its own tab named after its role, and every
-  `agentmap-team` command renames an agent's tab to its role when it is the
+  `horchestra-team` command renames an agent's tab to its role when it is the
   only agent in that tab (set `name_tabs = false` in team.toml to turn off)
 - Claude members and the orchestrator are started with `--name <role>`, so the
   conversation (prompt box, `/resume` picker, terminal title) has the same
@@ -182,8 +186,8 @@ blocks every other skill found in `~/.claude/skills` and the project's
 listed from disk, so for those only the instruction applies.
 
 For a Claude member, hiring generates a session agent
-`.claude/agents/orchestra-<role>.md` (team context + ROLE.md + skills to use)
-and starts it with `claude --agent orchestra-<role> --settings <deny rules>
+`.claude/agents/horchestra-<role>.md` (team context + ROLE.md + skills to use)
+and starts it with `claude --agent horchestra-<role> --settings <deny rules>
 --add-dir <profile folder>`. The member still sees the project's own
 CLAUDE.md and skills. Other agent kinds get the same instructions in their
 first message.
@@ -198,11 +202,11 @@ What is and is not guaranteed (tested with Claude Code 2.1):
 | `only_skills` | instruction for all skills; hard block for skills on disk; plugin and built-in skills rely on the instruction |
 | After a Herdr restart | the startup hook re-applies each member's profile (see below) |
 
-Check a member from its pane with `/skills` and `/context`; `agentmap-team
-status`, `agentmap-team roles`, and the map's details box show each member's
+Check a member from its pane with `/skills` and `/context`; `horchestra-team
+status`, `horchestra-team roles`, and the map's details box show each member's
 profile.
 
-**Applying a profile to a running agent.** `agentmap-team respawn <role>`
+**Applying a profile to a running agent.** `horchestra-team respawn <role>`
 quits the member's Claude session and restarts it in the same pane with
 `claude --resume <its session> --system-prompt-snapshot off` plus its profile
 flags. It keeps its whole conversation and gains the role instructions,
@@ -215,17 +219,19 @@ ROLE.md, or with `--all` for the whole team. Wait until the member is idle
 Members keep their own line in the map:
 
 ```bash
-agentmap-team report "tests 3/5 passing"
-agentmap-team report --needs-you "Use v1 or v2 API docs?"
-agentmap-team report --clear
+horchestra-team report "tests 3/5 passing"
+horchestra-team report --needs-you "Use v1 or v2 API docs?"
+horchestra-team report --clear
 ```
 
 `report` only updates the map (and `status`); to tell the orchestrator
-something, a member runs `agentmap-team message orchestrator "…"`, which
+something, a member runs `horchestra-team message orchestrator "…"`, which
 arrives in the orchestrator's conversation as
-`[agent-map] message from <role>: …`. Hired and respawned members have both
-commands in their instructions; the orchestrator tells adopted ones. A needs-you report shows `!` until the agent works again and sends a
-Herdr notification. Herdr's own "agent finished / needs input" alerts cover
+`[horchestra] message from <role>: …`. Hired and respawned members have both
+commands in their instructions; the orchestrator tells adopted ones.
+
+A needs-you report shows `!` until the agent works again and sends a Herdr
+notification. Herdr's own "agent finished / needs input" alerts cover
 the rest. Both follow `[ui.toast]` in Herdr's config, which is off by default:
 
 ```toml
@@ -245,7 +251,6 @@ integrations are current. The plugin's startup hook then:
 - starts a fresh orchestrator in its pane if its conversation could not be
   resumed
 - reopens map panes, which come back as idle shells
-
 - respawns every Claude member launched with a profile, because Herdr's plain
   `claude --resume` would bring back the instructions recorded when the
   conversation began; the orchestrator is refreshed from the current
@@ -253,23 +258,33 @@ integrations are current. The plugin's startup hook then:
 
 Members whose conversation did not resume are reported to the orchestrator,
 never restarted automatically, so nothing runs twice. Results are in
-`herdr plugin log list --plugin agent-map`.
+`herdr plugin log list --plugin horchestra`.
 
 ## Configuration
 
 | Setting | Where | Default |
 | --- | --- | --- |
-| Map width | a number in `$(herdr plugin config-dir agent-map)/width` | 32 |
-| Map toggle key | the managed block in Herdr's config, or bind `agent-map.toggle` yourself | `prefix+m` |
-| Team-start key | bind the `agent-map.team-up` action | none |
+| Map width | a number in `$(herdr plugin config-dir horchestra)/width` | 32 |
+| Map toggle key | the managed block in Herdr's config, or bind `horchestra.toggle` yourself | `prefix+m` |
+| Team-start key | bind the `horchestra.team-up` action | none |
 | Default member agent | `default_kind` in team.toml | `claude` |
-| Plugin state | `AGENTMAP_STATE_DIR` | `~/.local/state/herdr-agent-map` |
+| Plugin state | `HORCHESTRA_STATE_DIR` | `~/.local/state/horchestra` |
+
+### Upgrading from the pre-0.1 names
+
+Earlier builds were called `agent-map` with `agentmap-team` /
+`agentmap-tag`. Re-run `horchestra.setup` after installing: it replaces the
+old key binding, links the new commands, keeps `agentmap-team` /
+`agentmap-tag` as deprecated aliases (running agents may still use them), and
+the state folder moves to `~/.local/state/horchestra` on first use. Run
+`horchestra-team respawn --all` and `respawn orchestrator` so running agents
+get instructions with the new names.
 
 ## Uninstall
 
 ```bash
-herdr plugin action invoke agent-map.teardown
-herdr plugin uninstall agent-map
+herdr plugin action invoke horchestra.teardown
+herdr plugin uninstall horchestra
 ```
 
 `teardown` removes only what `setup` added. `team.toml` files in your
@@ -302,19 +317,34 @@ and `hire` start agents on your machine. Read `install.py` and
 - `hire` and `fire` rewrite team.toml, dropping comments added by hand.
 - Files in `~/.claude/agents` are also offered as subagents in every Claude
   session; the orchestrator's description asks Claude not to use it that way.
-- Manually tagged panes (`agentmap-tag`) lose their tags on a Herdr restart.
-- Hiring a Claude member writes `.claude/agents/orchestra-<role>.md` into the
+- Manually tagged panes (`horchestra-tag`) lose their tags on a Herdr restart.
+- Hiring a Claude member writes `.claude/agents/horchestra-<role>.md` into the
   project; commit it or add `.claude/agents/orchestra-*.md` to `.gitignore`.
 
 ## Development
 
 ```bash
-git clone git@github.com:SimoneDaniotti/herdr-orchestra.git
-cd herdr-orchestra
+gh repo clone SimoneDaniotti/horchestra   # or git clone https://github.com/SimoneDaniotti/horchestra
+cd horchestra
 herdr plugin link .            # run your working copy
 python3 install.py install     # same as the setup action
 python3 -m unittest discover -s tests -t .
 ```
+
+## Credits
+
+Horchestra is built on [Herdr](https://herdr.dev)'s plugin system and
+public CLI. Several ideas came from other Herdr plugins; no code was copied
+from them:
+
+| Idea | From |
+| --- | --- |
+| Card-style agent nodes and a tree/graph view of agents | [herdr-world](https://github.com/IvoryHeart/herdr-world) |
+| A details box for the selected item under the graph | [herdr-dagr](https://github.com/aemrebarut/herdr-dagr) |
+| Agent-reported progress, "needs you" flags, adopting agent panes you already started | [herdr-projects](https://github.com/eliasstravik/herdr-projects) |
+| Per-vendor agent icons and colours | [herdr-radar](https://github.com/hhdebb/herdr-radar), herdr-world |
+| Nesting agents under the agent that spawned them | [herdr-pi-tree](https://github.com/edxeth/herdr-pi-tree) |
+| A side panel that sits next to each agent tab | [agent-panel](https://github.com/flowy11/agent-panel) |
 
 ## License
 
