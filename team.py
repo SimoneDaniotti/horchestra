@@ -340,17 +340,33 @@ def split_largest(tab_panes, cwd):
     return result["pane"]["pane_id"]
 
 
-def new_member_pane(space, cwd):
-    """Members live in a `team` tab of the space, tiled as they are hired."""
-    tabs = hc.call("tab", "list", "--workspace", space.workspace_id).get("tabs") or []
-    tab = next((t for t in tabs if t.get("label") == "team"), None)
-    if tab:
-        in_tab = [p["pane_id"] for p in space.panes if p.get("tab_id") == tab.get("tab_id")]
-        if in_tab:
-            return split_largest(in_tab, cwd)
+def new_member_pane(space, cwd, role):
+    """Each member gets its own tab, named after its role."""
     created = hc.call("tab", "create", "--workspace", space.workspace_id,
-                      "--label", "team", "--cwd", cwd)
+                      "--label", role, "--cwd", cwd)
     return created["root_pane"]["pane_id"]
+
+
+def name_tabs(space, log=print):
+    """Keep each agent's tab named after its role.
+
+    Only renames a tab when that agent is the only agent in it (plain shells
+    and map panes do not count), since one tab cannot carry two names.
+    """
+    if space.team.get("name_tabs") is False:
+        return
+    tabs = {t.get("tab_id"): t.get("label") for t in
+            (hc.call_quiet("tab", "list", "--workspace", space.workspace_id) or {}).get("tabs") or []}
+    agents_per_tab = {}
+    for p in space.panes:
+        if p.get("agent") and not tokens_of(p).get(hc.TOKEN_VIEW):
+            agents_per_tab[p.get("tab_id")] = agents_per_tab.get(p.get("tab_id"), 0) + 1
+    for role in [ORCHESTRATOR] + [m["role"] for m in space.team["member"]]:
+        pane = space.pane(role)
+        tab = pane.get("tab_id") if pane else None
+        if tab in tabs and agents_per_tab.get(tab) == 1 and tabs[tab] != role:
+            if hc.call_quiet("tab", "rename", tab, role) is not None:
+                tabs[tab] = role
 
 
 def team_context(space, role):
@@ -396,8 +412,8 @@ def orchestrator_protocol(space, team):
     return text + (f"\nProject brief from the human:\n{brief}\n" if brief else "")
 
 
-def start_orchestrator(space, team, near_pane):
-    """Start the orchestrator in the caller's shell pane, or split beside it."""
+def orchestrator_args(space, team):
+    """Launch args for the orchestrator (before any resume args)."""
     orch = team["orchestrator"]
     kind = orch.get("kind", "claude")
     args = [str(a) for a in orch.get("args", [])]
@@ -405,7 +421,7 @@ def start_orchestrator(space, team, near_pane):
     if kind == "claude" and os.path.isfile(AGENT_FILE):
         # The installed session agent carries the protocol, and
         # `claude --resume` keeps it.
-        args = ["--agent", "orchestrator", *args]
+        args = ["--name", ORCHESTRATOR, "--agent", "orchestrator", *args]
     elif kind == "claude":
         # Multi-line text cannot be passed safely as a shell argument; hand
         # Claude a file instead so the protocol lives in its system prompt.
@@ -413,8 +429,15 @@ def start_orchestrator(space, team, near_pane):
         prompt_file = os.path.join(STATE_DIR, f"{space.agent_name(ORCHESTRATOR)}.md")
         with open(prompt_file, "w") as fh:
             fh.write(protocol)
-        args = ["--append-system-prompt-file", prompt_file, *args]
+        args = ["--name", ORCHESTRATOR, "--append-system-prompt-file", prompt_file, *args]
+    return args
 
+
+def start_orchestrator(space, team, near_pane):
+    """Start the orchestrator in the caller's shell pane, or split beside it."""
+    kind = team["orchestrator"].get("kind", "claude")
+    protocol = orchestrator_protocol(space, team)
+    args = orchestrator_args(space, team)
     target = near_pane.get("pane_id") if near_pane else None
     if not target or near_pane.get("agent") or near_pane.get("workspace_id") != space.workspace_id:
         base = target if target and near_pane.get("workspace_id") == space.workspace_id else space.panes[0]["pane_id"]
@@ -432,24 +455,92 @@ def spawn_member(space, team, member):
     cwd = os.path.join(space.root, member.get("cwd", "")) if member.get("cwd") else space.root
     pane = space.pane(role)
     if pane is None:
-        pane_id = new_member_pane(space, cwd)
+        pane_id = new_member_pane(space, cwd, role)
         hc.call("pane", "rename", pane_id, LABEL_PREFIX + role)
     else:
         pane_id = pane["pane_id"]
     kind = member.get("kind") or team.get("default_kind", "claude")
     profile = load_profile(space, member)
-    context = team_context(space, role)
-    args = [str(a) for a in member.get("args", [])]
+    args = member_args(space, member, profile)
     if kind == "claude":
-        # Profile -> session agent (+ role skills dir, deny settings).
-        args = roles.claude_args(space.root, STATE_DIR, space.agent_name(role), profile, context) + args
         brief = member_brief(member)
+        # Its team context and profile live in launch flags; restore re-applies them.
+        member["profile_applied"] = True
     else:
         # Other agents get the same instructions in their first message.
-        brief = roles.agent_body(profile, context) + "\n" + member_brief(member)
+        brief = roles.agent_body(profile, team_context(space, role)) + "\n" + member_brief(member)
     start_agent(space.agent_name(role), kind, pane_id, args)
     prompt(pane_id, brief)
     return wait_for_session(space, pane_id)
+
+
+def member_args(space, member, profile):
+    """Launch args for a member (before any resume args)."""
+    args = [str(a) for a in member.get("args", [])]
+    kind = member.get("kind") or space.team.get("default_kind", "claude")
+    if kind != "claude":
+        return args
+    # Profile -> session agent (+ role skills dir, deny settings). --add-dir is
+    # variadic, so the user's args (flags) follow it.
+    context = team_context(space, member["role"])
+    # --name keeps the Claude conversation named after the role (and its tab).
+    return (["--name", member["role"]]
+            + roles.claude_args(space.root, STATE_DIR, space.agent_name(member["role"]), profile, context)
+            + args)
+
+
+# ---- respawn ------------------------------------------------------------
+
+
+def quit_agent(pane_id, seconds=20.0):
+    """Exit the agent in a pane (Ctrl+C twice) and wait for its shell."""
+    hc.call("pane", "send-keys", pane_id, "ctrl+c", "ctrl+c")
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        time.sleep(1.0)
+        pane = hc.get_pane(pane_id)
+        if not pane.get("agent"):
+            time.sleep(0.5)  # let the shell print its prompt
+            return
+    raise TeamError(f"the agent in {pane_id} did not exit; quit it by hand and re-run respawn")
+
+
+def respawn(space, role, force=False, log=print):
+    """Restart a Claude agent in place with its current profile, keeping its conversation.
+
+    `claude --resume <session> --system-prompt-snapshot off` rebuilds the system
+    prompt from the new --agent / --settings / --add-dir instead of reusing the
+    one recorded when the conversation started.
+    """
+    is_orch = role == ORCHESTRATOR
+    entry = space.entry(role)
+    if entry is None:
+        raise TeamError(f"{role} is not on the team")
+    pane = space.pane(role)
+    if not pane or not pane.get("agent"):
+        raise TeamError(f"{role} has no running agent to respawn; use `sync` to start it")
+    kind = entry.get("kind") or space.team.get("default_kind", "claude")
+    if kind != "claude" or pane.get("agent") != "claude":
+        raise TeamError(f"{role} is not a Claude agent; respawn only supports Claude")
+    session = session_of(pane) or entry.get("session")
+    if not session:
+        raise TeamError(f"{role} has no recorded session id to resume")
+    if pane.get("agent_status") == "working" and not force:
+        raise TeamError(f"{role} is working; wait until it is idle or pass --force")
+    if is_orch:
+        launch = orchestrator_args(space, space.team)
+    else:
+        profile = load_profile(space, entry)
+        launch = member_args(space, entry, profile)
+    args = ["--resume", session, "--system-prompt-snapshot", "off", *launch]
+    log(f"respawning {role} in {pane['pane_id']}…")
+    quit_agent(pane["pane_id"])
+    start_agent(space.agent_name(role), "claude", pane["pane_id"], args)
+    if not is_orch:
+        entry.pop("adopted", None)
+        entry["profile_applied"] = True
+    save(space.team_file, space.team)
+    wait_for_session(space, pane["pane_id"])
 
 
 def wait_for_session(space, pane_id, seconds=10.0):
@@ -548,6 +639,7 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
 
     if space.dirty:
         save(space.team_file, team)
+    name_tabs(space, log=log)
     remember_terminals(space.team_file, {
         role: pane.get("terminal_id")
         for role in [ORCHESTRATOR] + [m["role"] for m in team["member"]]
@@ -566,19 +658,19 @@ def profile_line(space, member):
         line = roles.load(space.root, space.team, member).summary()
     except roles.RoleError as exc:
         line = f"profile error: {exc}"
-    if member.get("adopted"):
-        line += " · not applied (adopted)"
+    if member.get("adopted") and line != "no profile":
+        line += " · not applied: respawn"
     return line[:80]
 
 
-def profile_lost_on_resume(space, member):
-    """Role skills and deny rules come from flags `claude --resume` drops."""
-    try:
-        profile = roles.load(space.root, space.team, member)
-    except roles.RoleError:
-        return False
+def needs_reapply(space, member, st):
+    """A profile-launched Claude member that was restarted (not handed off)."""
     kind = member.get("kind") or space.team.get("default_kind", "claude")
-    return kind == "claude" and not member.get("adopted") and bool(profile.own_skills or profile.all_denied)
+    if kind != "claude" or not member.get("profile_applied"):
+        return False
+    pane = space.pane(member["role"]) or {}
+    before = st.get("terminals", {}).get(member["role"])
+    return bool(before) and before != pane.get("terminal_id")
 
 
 RESUME_NOTE = (
@@ -691,12 +783,23 @@ def finish_restore(space, live, st, log=print):
         f"re-hire them if still needed): {', '.join(missing)}. "
         if missing else ""
     )
-    degraded = [m["role"] for m in team["member"]
-                if m["role"] in live and profile_lost_on_resume(space, m)]
-    if degraded:
-        note += (f"Resumed without their role-only skills and skill deny rules "
-                 f"(instructions kept): {', '.join(degraded)}; fire and re-hire them "
-                 "if they need those. ")
+    # Herdr resumes with a plain `claude --resume`, which reuses the system
+    # prompt recorded when each conversation began: re-apply role profiles.
+    reapplied, failed = [], []
+    for member in team["member"]:
+        if member["role"] in live and needs_reapply(space, member, st):
+            try:
+                respawn(space, member["role"], log=log)
+                reapplied.append(member["role"])
+            except (TeamError, hc.HerdrError) as exc:
+                log(f"could not re-apply {member['role']}'s profile: {exc}")
+                failed.append(member["role"])
+    if reapplied:
+        note += f"Role profiles were re-applied to: {', '.join(reapplied)}. "
+    if failed:
+        note += (f"Could not re-apply role profiles to: {', '.join(failed)} (they run "
+                 "without their role instructions and skill rules; try "
+                 "`agentmap-team respawn <role>`). ")
     if ORCHESTRATOR not in live:
         log("orchestrator did not resume; starting a fresh one")
         try:
@@ -707,6 +810,12 @@ def finish_restore(space, live, st, log=print):
             log(f"could not start orchestrator: {exc}")
     elif st.get("orch_resumed"):
         log("re-briefing resumed orchestrator")
+        if team["orchestrator"].get("kind", "claude") == "claude":
+            try:
+                # Refresh its instructions from the current orchestrator.md.
+                respawn(space, ORCHESTRATOR, log=log)
+            except (TeamError, hc.HerdrError) as exc:
+                log(f"could not refresh the orchestrator's instructions: {exc}")
         orch = space.pane(ORCHESTRATOR)
         text = RESUME_NOTE.format(missing=note)
         if not os.path.isfile(AGENT_FILE):
@@ -905,6 +1014,34 @@ def cmd_roles(args):
         print(f"  {name:<16}{has_md:<12}skills: {', '.join(skills) or '-':<30} used by: {', '.join(users) or '-'}")
 
 
+def cmd_respawn(args):
+    space, me = resolve_space(args.file)
+    roles_wanted = [m["role"] for m in space.team["member"]] if args.all else [args.role]
+    if not roles_wanted or roles_wanted == [None]:
+        raise TeamError("give a role, or --all")
+    targets = {(space.pane(r) or {}).get("pane_id") for r in roles_wanted}
+    if me.get("pane_id") in targets and not os.environ.get("AGENTMAP_DETACHED"):
+        # Respawning the agent that runs this command: finish in the background.
+        import subprocess
+
+        argv = [sys.executable, os.path.realpath(__file__), "--file", space.team_file, "respawn"]
+        argv += ["--all"] if args.all else [args.role]
+        argv += ["--force"] if args.force else []
+        log_path = os.path.join(STATE_DIR, "respawn.log")
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(log_path, "a") as log:
+            subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                             start_new_session=True, env={**os.environ, "AGENTMAP_DETACHED": "1"})
+        print(f"respawning in the background (this session will restart); log: {log_path}")
+        return
+    for role in roles_wanted:
+        if args.all and not (space.entry(role) or {}).get("kind", "claude") == "claude":
+            continue
+        respawn(space, role, force=args.force)
+        print(f"respawned {role}")
+    sync(space, spawn=False, log=lambda _msg: None)
+
+
 def cmd_sync(args):
     space, pane = resolve_space(args.file)
     sync(space, near_pane=pane)
@@ -994,6 +1131,11 @@ def main(argv=None):
     sub.add_parser("scan", help="list running agents in this space that are not on the team").set_defaults(func=cmd_scan)
     sub.add_parser("sync", help="apply team.toml: start missing members, repair tags").set_defaults(func=cmd_sync)
     sub.add_parser("roles", help="list role profiles (.orchestra/roles) and who uses them").set_defaults(func=cmd_roles)
+    resp = sub.add_parser("respawn", help="restart a Claude agent with its current profile, keeping its conversation")
+    resp.add_argument("role", nargs="?")
+    resp.add_argument("--all", action="store_true", help="every Claude member")
+    resp.add_argument("--force", action="store_true", help="even if it is working")
+    resp.set_defaults(func=cmd_respawn)
     sub.add_parser("status", help="show the team").set_defaults(func=cmd_status)
     report = sub.add_parser("report", help="set your status line in the agent map (run by members)")
     report.add_argument("text", nargs="*")

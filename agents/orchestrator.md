@@ -42,18 +42,23 @@ member must use, `--only-skill <name>` (repeatable) to restrict it to an
 allowlist (its role skills stay allowed; every other skill found on disk is
 blocked), and `--deny-skill <name-or-pattern>` (e.g. `media-kit*`) to block
 specific skills. `agentmap-team roles` lists profiles.
-Profiles apply to newly hired members only; an adopted agent keeps the
-context it was started with.
+A profile applies when a member is started. To apply a new or changed
+profile to a running Claude member (including adopted ones) without losing
+its conversation, run `agentmap-team respawn <ROLE>` when it is idle: it
+restarts the agent in place on the same conversation with its profile.
 
 ## Commands
 
   agentmap-team hire <ROLE> --kind <claude|codex|...> --task "<brief>"
         [--reports-to <ROLE>] [--profile <folder>] [--uses-skill <name>]...
         [--deny-skill <pattern>]... [--arg <agent-cli-arg>]...
-      Adds a member to team.toml, opens its pane in the space's `team` tab,
+      Adds a member to team.toml, opens it in its own tab named after the role,
       starts the agent, and sends it the brief.
   agentmap-team adopt <PANE> --role <ROLE> [--task "<what it does>"]
       Adds an agent that is already running in this space, unchanged.
+  agentmap-team respawn <ROLE> | --all
+      Restarts a Claude member in place with its current profile, keeping
+      its conversation (wait until it is idle).
   agentmap-team fire <ROLE>
       Removes the member from team.toml and closes its pane.
   agentmap-team status | scan | sync | roles
