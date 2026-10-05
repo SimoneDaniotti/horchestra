@@ -4,19 +4,42 @@ on:
   push:
   pull_request:
 
+# A newer push to the same ref supersedes a queued or running check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.11", "3.12", "3.13"]
+  # One Linux job covers every supported Python sequentially: private repos
+  # get few concurrent runners, and a wide matrix leaves jobs stuck in queue.
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: |
+            3.11
+            3.12
+            3.13
+      - name: Test on each Python
+        run: |
+          for v in 3.11 3.12 3.13; do
+            echo "::group::Python $v"
+            python$v -m py_compile *.py bin/agentmap-team bin/agentmap-tag
+            python$v -W error::ResourceWarning -m unittest discover -s tests -t .
+            echo "::endgroup::"
+          done
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
       - name: Compile
         run: python -m py_compile *.py bin/agentmap-team bin/agentmap-tag
       - name: Unit tests
