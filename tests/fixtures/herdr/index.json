@@ -1,0 +1,274 @@
+{
+  "fixtures": {
+    "agent_get_by_name.json": {
+      "argv": [
+        "agent",
+        "get",
+        "docs-site-9f3e-orchestrator"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "agent_get_by_pane.json": {
+      "argv": [
+        "agent",
+        "get",
+        "wV:p2"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "agent_list.json": {
+      "argv": [
+        "agent",
+        "list"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "api_schema.json": {
+      "argv": [
+        "api",
+        "schema",
+        "--json"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "errors/agent_get.json": {
+      "argv": [
+        "agent",
+        "get",
+        "no-such-agent"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/agent_wait.json": {
+      "argv": [
+        "agent",
+        "wait",
+        "no-such-agent",
+        "--until",
+        "idle",
+        "--timeout",
+        "1"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/pane_edges.json": {
+      "argv": [
+        "pane",
+        "edges",
+        "--pane",
+        "w99:p99"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/pane_get.json": {
+      "argv": [
+        "pane",
+        "get",
+        "w99:p99"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/pane_list.json": {
+      "argv": [
+        "pane",
+        "list",
+        "--workspace",
+        "w999"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/process_info.json": {
+      "argv": [
+        "pane",
+        "process-info",
+        "--pane",
+        "w99:p99"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/tab_list.json": {
+      "argv": [
+        "tab",
+        "list",
+        "--workspace",
+        "w999"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "errors/workspace_get.json": {
+      "argv": [
+        "workspace",
+        "get",
+        "w999"
+      ],
+      "format": "json",
+      "returncode": 1,
+      "stream": "stderr"
+    },
+    "integration_status.txt": {
+      "argv": [
+        "integration",
+        "status"
+      ],
+      "format": "text",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "pane_edges.json": {
+      "argv": [
+        "pane",
+        "edges",
+        "--pane",
+        "wV:p2"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "pane_get_agent.json": {
+      "argv": [
+        "pane",
+        "get",
+        "wV:p2"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "pane_get_map.json": {
+      "argv": [
+        "pane",
+        "get",
+        "wV:pK"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "pane_list.json": {
+      "argv": [
+        "pane",
+        "list"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "pane_list_workspace.json": {
+      "argv": [
+        "pane",
+        "list",
+        "--workspace",
+        "wV"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "plugin_list.json": {
+      "argv": [
+        "plugin",
+        "list",
+        "--json"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "plugin_list.txt": {
+      "argv": [
+        "plugin",
+        "list"
+      ],
+      "format": "text",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "process_info_agent.json": {
+      "argv": [
+        "pane",
+        "process-info",
+        "--pane",
+        "wV:p2"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "process_info_map.json": {
+      "argv": [
+        "pane",
+        "process-info",
+        "--pane",
+        "wV:pK"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "process_info_plain_shell.json": {
+      "argv": [
+        "pane",
+        "process-info",
+        "--pane",
+        "w4:p3"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "tab_list.json": {
+      "argv": [
+        "tab",
+        "list",
+        "--workspace",
+        "wV"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "workspace_get.json": {
+      "argv": [
+        "workspace",
+        "get",
+        "wV"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    },
+    "workspace_list.json": {
+      "argv": [
+        "workspace",
+        "list"
+      ],
+      "format": "json",
+      "returncode": 0,
+      "stream": "stdout"
+    }
+  },
+  "herdr_version": "0.9.3"
+}

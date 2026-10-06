@@ -1,0 +1,34 @@
+{
+  "id": "cli:agent:get",
+  "result": {
+    "agent": {
+      "agent": "claude",
+      "agent_session": {
+        "agent": "claude",
+        "kind": "id",
+        "source": "herdr:claude",
+        "value": "00000000-0000-4000-8000-000000000007"
+      },
+      "agent_status": "idle",
+      "completion_seq": 60,
+      "cwd": "/home/user/projects/docs-site",
+      "focused": false,
+      "foreground_cwd": "/home/user/projects/docs-site",
+      "interactive_ready": true,
+      "name": "docs-site-9f3e-orchestrator",
+      "pane_id": "wV:p2",
+      "revision": 4,
+      "state_change_seq": 60,
+      "tab_id": "wV:t2",
+      "terminal_id": "term_0000000000000d",
+      "terminal_title": "✳ orchestrator",
+      "terminal_title_stripped": "orchestrator",
+      "tokens": {
+        "agentmap_role": "orchestrator",
+        "agentmap_task": "coordinates the team"
+      },
+      "workspace_id": "wV"
+    },
+    "type": "agent_info"
+  }
+}

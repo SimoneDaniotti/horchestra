@@ -1,0 +1,23 @@
+{
+  "id": "cli:pane:process_info",
+  "result": {
+    "process_info": {
+      "foreground_process_group_id": 17528,
+      "foreground_processes": [
+        {
+          "argv": [
+            "-zsh"
+          ],
+          "argv0": "zsh",
+          "cmdline": "-zsh",
+          "cwd": "/home/user/src/horchestra",
+          "name": "zsh",
+          "pid": 17528
+        }
+      ],
+      "pane_id": "w4:p3",
+      "shell_pid": 17528
+    },
+    "type": "pane_process_info"
+  }
+}

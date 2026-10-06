@@ -1,0 +1,16 @@
+{
+  "id": "cli:workspace:get",
+  "result": {
+    "type": "workspace_info",
+    "workspace": {
+      "active_tab_id": "wV:t2",
+      "agent_status": "idle",
+      "focused": false,
+      "label": "docs-site",
+      "number": 3,
+      "pane_count": 10,
+      "tab_count": 5,
+      "workspace_id": "wV"
+    }
+  }
+}

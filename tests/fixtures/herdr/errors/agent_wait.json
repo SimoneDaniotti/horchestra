@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "agent",
+    "wait",
+    "no-such-agent",
+    "--until",
+    "idle",
+    "--timeout",
+    "1"
+  ],
+  "returncode": 1,
+  "stderr": "{\"error\":{\"code\":\"agent_not_found\",\"message\":\"agent target no-such-agent not found\"},\"id\":\"cli:agent:wait\"}\n",
+  "stdout": ""
+}

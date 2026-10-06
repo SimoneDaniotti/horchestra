@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "tab",
+    "list",
+    "--workspace",
+    "w999"
+  ],
+  "returncode": 1,
+  "stderr": "{\"error\":{\"code\":\"workspace_not_found\",\"message\":\"workspace w999 not found\"},\"id\":\"cli:tab:list\"}\n",
+  "stdout": ""
+}

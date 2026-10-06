@@ -1,0 +1,683 @@
+{
+  "id": "cli:pane:list",
+  "result": {
+    "panes": [
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000001"
+        },
+        "agent_status": "working",
+        "cwd": "/home/user/projects/dotfiles",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/dotfiles",
+        "pane_id": "w9:p1",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 3533,
+          "offset_from_bottom": 0,
+          "viewport_rows": 74
+        },
+        "tab_id": "w9:t1",
+        "terminal_id": "term_00000000000001",
+        "terminal_title": "◑ editing checkout.py",
+        "terminal_title_stripped": "editing checkout.py",
+        "workspace_id": "w9"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "w11:pC",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t1",
+        "terminal_id": "term_00000000000002",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000002"
+        },
+        "agent_status": "working",
+        "cwd": "/home/user/projects/webshop",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/webshop",
+        "label": "team:orchestrator",
+        "pane_id": "w11:p1",
+        "revision": 2,
+        "scroll": {
+          "max_offset_from_bottom": 3073,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t1",
+        "terminal_id": "term_00000000000003",
+        "terminal_title": "◑ orchestrator",
+        "terminal_title_stripped": "orchestrator",
+        "tokens": {
+          "agentmap_role": "orchestrator",
+          "agentmap_task": "coordinates the team"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "w11:pD",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t2",
+        "terminal_id": "term_00000000000004",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000003"
+        },
+        "agent_status": "done",
+        "cwd": "/home/user/projects/webshop",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/webshop",
+        "label": "team:backend",
+        "pane_id": "w11:p2",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 3802,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t2",
+        "terminal_id": "term_00000000000005",
+        "terminal_title": "✳ backend",
+        "terminal_title_stripped": "backend",
+        "tokens": {
+          "agentmap_parent": "term_00000000000003",
+          "agentmap_profile": "backend · only 4 skills · denies 25",
+          "agentmap_role": "backend",
+          "agentmap_task": "Implement the checkout API and its tests; report when the endpoints are green"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "w11:pE",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t3",
+        "terminal_id": "term_00000000000006",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000004"
+        },
+        "agent_status": "done",
+        "cwd": "/home/user/projects/webshop",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/webshop",
+        "label": "team:frontend",
+        "pane_id": "w11:p3",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 3084,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t3",
+        "terminal_id": "term_00000000000007",
+        "terminal_title": "✳ frontend",
+        "terminal_title_stripped": "frontend",
+        "tokens": {
+          "agentmap_parent": "term_00000000000003",
+          "agentmap_profile": "frontend · only 4 skills · denies 26",
+          "agentmap_role": "frontend",
+          "agentmap_task": "Build the cart page in web/; keep the design tokens in sync with the style guide"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "w11:pF",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t4",
+        "terminal_id": "term_00000000000008",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000005"
+        },
+        "agent_status": "done",
+        "cwd": "/home/user/projects/webshop",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/webshop",
+        "label": "team:docs",
+        "pane_id": "w11:p4",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 6136,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t4",
+        "terminal_id": "term_00000000000009",
+        "terminal_title": "✳ docs",
+        "terminal_title_stripped": "docs",
+        "tokens": {
+          "agentmap_parent": "term_00000000000003",
+          "agentmap_profile": "docs · only 11 skills · denies 18",
+          "agentmap_role": "docs",
+          "agentmap_task": "Write the API reference for the checkout endpoints in docs/; link every example"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "w11:pG",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t5",
+        "terminal_id": "term_0000000000000a",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent": "codex",
+        "agent_session": {
+          "agent": "codex",
+          "kind": "id",
+          "source": "herdr:codex",
+          "value": "00000000-0000-4000-8000-000000000006"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/webshop",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/webshop",
+        "label": "team:security",
+        "pane_id": "w11:p5",
+        "revision": 3,
+        "scroll": {
+          "max_offset_from_bottom": 32,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w11:t5",
+        "terminal_id": "term_0000000000000b",
+        "terminal_title": "Review payment changes | webshop",
+        "terminal_title_stripped": "Review payment changes | webshop",
+        "tokens": {
+          "agentmap_parent": "term_00000000000003",
+          "agentmap_profile": "security",
+          "agentmap_role": "security",
+          "agentmap_task": "Independent read-only reviewer for the backend, frontend and docs members. Wait"
+        },
+        "workspace_id": "w11"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": true,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "wV:pK",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t2",
+        "terminal_id": "term_0000000000000c",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000007"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/docs-site",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/docs-site",
+        "label": "team:orchestrator",
+        "pane_id": "wV:p2",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 5724,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t2",
+        "terminal_id": "term_0000000000000d",
+        "terminal_title": "✳ orchestrator",
+        "terminal_title_stripped": "orchestrator",
+        "tokens": {
+          "agentmap_role": "orchestrator",
+          "agentmap_task": "coordinates the team"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "wV:pJ",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t1",
+        "terminal_id": "term_0000000000000e",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000008"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/docs-site",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/docs-site",
+        "label": "team:backend",
+        "pane_id": "wV:p1",
+        "revision": 2,
+        "scroll": {
+          "max_offset_from_bottom": 5331,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t1",
+        "terminal_id": "term_0000000000000f",
+        "terminal_title": "✳ backend-order-service",
+        "terminal_title_stripped": "backend-order-service",
+        "tokens": {
+          "agentmap_parent": "term_0000000000000d",
+          "agentmap_profile": "no profile",
+          "agentmap_role": "backend",
+          "agentmap_task": "Implement the checkout API and its tests; report when the endpoints are green"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "wV:pM",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t3",
+        "terminal_id": "term_00000000000010",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000009"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/docs-site",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/docs-site",
+        "label": "team:tests",
+        "pane_id": "wV:p5",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 5555,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t3",
+        "terminal_id": "term_00000000000011",
+        "terminal_title": "✳ tests",
+        "terminal_title_stripped": "tests",
+        "tokens": {
+          "agentmap_parent": "term_0000000000000d",
+          "agentmap_profile": "tests · uses pytest-helper, coverage · denies 2",
+          "agentmap_role": "tests",
+          "agentmap_task": "Read .orchestra/roles/tests/ROLE.md first; it is your full brief. Start phase 1:"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "wV:pN",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t4",
+        "terminal_id": "term_00000000000012",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent": "codex",
+        "agent_session": {
+          "agent": "codex",
+          "kind": "id",
+          "source": "herdr:codex",
+          "value": "00000000-0000-4000-8000-000000000010"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/docs-site",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/docs-site",
+        "label": "team:reviewer",
+        "pane_id": "wV:p7",
+        "revision": 3,
+        "scroll": {
+          "max_offset_from_bottom": 154,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t4",
+        "terminal_id": "term_00000000000013",
+        "terminal_title": "Review assigned brief | docs-site",
+        "terminal_title_stripped": "Review assigned brief | docs-site",
+        "tokens": {
+          "agentmap_parent": "term_0000000000000d",
+          "agentmap_profile": "reviewer",
+          "agentmap_role": "reviewer",
+          "agentmap_task": "Read .orchestra/roles/reviewer/ROLE.md (also AGENTS.md); it is your full brief."
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "horchestra-map",
+        "pane_id": "wV:pP",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t5",
+        "terminal_id": "term_00000000000014",
+        "tokens": {
+          "agentmap_view": "1"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000011"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/docs-site",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/docs-site",
+        "label": "team:docs",
+        "pane_id": "wV:p9",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 4310,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "wV:t5",
+        "terminal_id": "term_00000000000015",
+        "terminal_title": "✳ docs",
+        "terminal_title_stripped": "docs",
+        "tokens": {
+          "agentmap_parent": "term_0000000000000d",
+          "agentmap_profile": "docs · uses docs-writer, api-reference · denies 2",
+          "agentmap_role": "docs",
+          "agentmap_task": "Write the API reference for the checkout endpoints in docs/; link every example"
+        },
+        "workspace_id": "wV"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000012"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/notes",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/notes",
+        "pane_id": "w1:p3",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 3293,
+          "offset_from_bottom": 0,
+          "viewport_rows": 74
+        },
+        "tab_id": "w1:t2",
+        "terminal_id": "term_00000000000016",
+        "terminal_title": "✳ [todo-list]",
+        "terminal_title_stripped": "[todo-list]",
+        "workspace_id": "w1"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000013"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/notes/memory",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/notes/memory",
+        "pane_id": "w1:p5",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 4467,
+          "offset_from_bottom": 0,
+          "viewport_rows": 74
+        },
+        "tab_id": "w1:t4",
+        "terminal_id": "term_00000000000017",
+        "terminal_title": "✳ [notes]",
+        "terminal_title_stripped": "[notes]",
+        "workspace_id": "w1"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "Agent map",
+        "pane_id": "w4:p3",
+        "revision": 0,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w4:t1",
+        "terminal_id": "term_00000000000018",
+        "workspace_id": "w4"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000014"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/game",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/game",
+        "pane_id": "w4:p1",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 493,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w4:t1",
+        "terminal_id": "term_00000000000019",
+        "terminal_title": "✳ Project overview",
+        "terminal_title_stripped": "Project overview",
+        "workspace_id": "w4"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/user/src/horchestra",
+        "focused": false,
+        "foreground_cwd": "/home/user/src/horchestra",
+        "label": "Agent map",
+        "pane_id": "w4:p4",
+        "revision": 0,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w4:t2",
+        "terminal_id": "term_0000000000001a",
+        "workspace_id": "w4"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "00000000-0000-4000-8000-000000000015"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/user/projects/game",
+        "focused": false,
+        "foreground_cwd": "/home/user/projects/game",
+        "pane_id": "w4:p2",
+        "revision": 1,
+        "scroll": {
+          "max_offset_from_bottom": 1012,
+          "offset_from_bottom": 0,
+          "viewport_rows": 72
+        },
+        "tab_id": "w4:t2",
+        "terminal_id": "term_0000000000001b",
+        "terminal_title": "✳ Pull request message review",
+        "terminal_title_stripped": "Pull request message review",
+        "workspace_id": "w4"
+      }
+    ],
+    "type": "pane_list"
+  }
+}

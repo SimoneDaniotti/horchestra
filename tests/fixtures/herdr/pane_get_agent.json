@@ -1,0 +1,36 @@
+{
+  "id": "cli:pane:get",
+  "result": {
+    "pane": {
+      "agent": "claude",
+      "agent_session": {
+        "agent": "claude",
+        "kind": "id",
+        "source": "herdr:claude",
+        "value": "00000000-0000-4000-8000-000000000007"
+      },
+      "agent_status": "idle",
+      "cwd": "/home/user/projects/docs-site",
+      "focused": false,
+      "foreground_cwd": "/home/user/projects/docs-site",
+      "label": "team:orchestrator",
+      "pane_id": "wV:p2",
+      "revision": 4,
+      "scroll": {
+        "max_offset_from_bottom": 6072,
+        "offset_from_bottom": 0,
+        "viewport_rows": 72
+      },
+      "tab_id": "wV:t2",
+      "terminal_id": "term_0000000000000d",
+      "terminal_title": "✳ orchestrator",
+      "terminal_title_stripped": "orchestrator",
+      "tokens": {
+        "agentmap_role": "orchestrator",
+        "agentmap_task": "coordinates the team"
+      },
+      "workspace_id": "wV"
+    },
+    "type": "pane_info"
+  }
+}

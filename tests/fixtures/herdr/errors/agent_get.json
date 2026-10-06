@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "agent",
+    "get",
+    "no-such-agent"
+  ],
+  "returncode": 1,
+  "stderr": "{\"error\":{\"code\":\"agent_not_found\",\"message\":\"agent target no-such-agent not found\"},\"id\":\"cli:agent:get\"}\n",
+  "stdout": ""
+}

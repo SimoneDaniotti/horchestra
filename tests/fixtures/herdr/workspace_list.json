@@ -1,0 +1,58 @@
+{
+  "id": "cli:workspace:list",
+  "result": {
+    "type": "workspace_list",
+    "workspaces": [
+      {
+        "active_tab_id": "w9:t1",
+        "agent_status": "working",
+        "focused": false,
+        "label": "dotfiles",
+        "number": 1,
+        "pane_count": 1,
+        "tab_count": 1,
+        "workspace_id": "w9"
+      },
+      {
+        "active_tab_id": "w11:t1",
+        "agent_status": "done",
+        "focused": false,
+        "label": "webshop",
+        "number": 2,
+        "pane_count": 10,
+        "tab_count": 5,
+        "workspace_id": "w11"
+      },
+      {
+        "active_tab_id": "wV:t2",
+        "agent_status": "idle",
+        "focused": true,
+        "label": "docs-site",
+        "number": 3,
+        "pane_count": 10,
+        "tab_count": 5,
+        "workspace_id": "wV"
+      },
+      {
+        "active_tab_id": "w1:t4",
+        "agent_status": "idle",
+        "focused": false,
+        "label": "notes",
+        "number": 4,
+        "pane_count": 2,
+        "tab_count": 2,
+        "workspace_id": "w1"
+      },
+      {
+        "active_tab_id": "w4:t2",
+        "agent_status": "idle",
+        "focused": false,
+        "label": "game",
+        "number": 5,
+        "pane_count": 4,
+        "tab_count": 2,
+        "workspace_id": "w4"
+      }
+    ]
+  }
+}

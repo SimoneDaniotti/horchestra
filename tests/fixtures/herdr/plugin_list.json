@@ -1,0 +1,116 @@
+{
+  "id": "cli:plugin",
+  "result": {
+    "plugins": [
+      {
+        "actions": [
+          {
+            "command": [
+              "python3",
+              "toggle.py",
+              "--overview"
+            ],
+            "contexts": [
+              "workspace"
+            ],
+            "id": "overview",
+            "title": "Toggle all-spaces agent map"
+          },
+          {
+            "command": [
+              "python3",
+              "install.py",
+              "install"
+            ],
+            "contexts": [
+              "workspace"
+            ],
+            "id": "setup",
+            "title": "Set up Horchestra (commands, orchestrator agent, map key)"
+          },
+          {
+            "command": [
+              "python3",
+              "team.py",
+              "up"
+            ],
+            "contexts": [
+              "workspace"
+            ],
+            "id": "team-up",
+            "title": "Start this space's agent team"
+          },
+          {
+            "command": [
+              "python3",
+              "install.py",
+              "teardown"
+            ],
+            "contexts": [
+              "workspace"
+            ],
+            "id": "teardown",
+            "title": "Remove what Horchestra setup added"
+          },
+          {
+            "command": [
+              "python3",
+              "toggle.py"
+            ],
+            "contexts": [
+              "workspace"
+            ],
+            "id": "toggle",
+            "title": "Toggle agent map"
+          }
+        ],
+        "description": "Orchestrator-led agent teams per space, with a live agent map in every tab",
+        "enabled": true,
+        "manifest_path": "/home/user/src/horchestra/herdr-plugin.toml",
+        "min_herdr_version": "0.9.3",
+        "name": "Horchestra",
+        "panes": [
+          {
+            "command": [
+              "python3",
+              "agentmap.py"
+            ],
+            "id": "map",
+            "placement": "split",
+            "title": "horchestra-map"
+          },
+          {
+            "command": [
+              "python3",
+              "agentmap.py",
+              "--all"
+            ],
+            "id": "overview",
+            "placement": "split",
+            "title": "horchestra-overview"
+          }
+        ],
+        "platforms": [
+          "linux",
+          "macos"
+        ],
+        "plugin_id": "horchestra",
+        "plugin_root": "/home/user/src/horchestra",
+        "source": {
+          "kind": "local"
+        },
+        "startup": [
+          {
+            "command": [
+              "python3",
+              "team.py",
+              "restore"
+            ]
+          }
+        ],
+        "version": "0.1.0"
+      }
+    ],
+    "type": "plugin_list"
+  }
+}

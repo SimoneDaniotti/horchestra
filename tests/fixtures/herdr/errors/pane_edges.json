@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "pane",
+    "edges",
+    "--pane",
+    "w99:p99"
+  ],
+  "returncode": 1,
+  "stderr": "{\"error\":{\"code\":\"pane_not_found\",\"message\":\"pane not found\"},\"id\":\"cli:pane:edges\"}\n",
+  "stdout": ""
+}

@@ -1,0 +1,55 @@
+{
+  "id": "cli:pane:process_info",
+  "result": {
+    "process_info": {
+      "foreground_process_group_id": 20452,
+      "foreground_processes": [
+        {
+          "argv": [
+            "/home/user/.cache/uv/archive-v0/0a1b2c3d/bin/python",
+            "/home/user/.cache/uv/archive-v0/0a1b2c3d/bin/docs-mcp"
+          ],
+          "argv0": "python",
+          "cmdline": "/home/user/.cache/uv/archive-v0/0a1b2c3d/bin/python /home/user/.cache/uv/archive-v0/0a1b2c3d/bin/docs-mcp",
+          "cwd": "/home/user/projects/docs-site",
+          "name": "python3.11",
+          "pid": 20557
+        },
+        {
+          "argv": [
+            "/opt/homebrew/bin/uv",
+            "tool",
+            "uvx",
+            "docs-mcp"
+          ],
+          "argv0": "uv",
+          "cmdline": "/opt/homebrew/bin/uv tool uvx docs-mcp",
+          "cwd": "/home/user/projects/docs-site",
+          "name": "uv",
+          "pid": 20542
+        },
+        {
+          "argv": [
+            "claude",
+            "--resume",
+            "00000000-0000-4000-8000-000000000007",
+            "--system-prompt-snapshot",
+            "off",
+            "--name",
+            "orchestrator",
+            "--agent",
+            "orchestrator"
+          ],
+          "argv0": "claude",
+          "cmdline": "claude --resume 00000000-0000-4000-8000-000000000007 --system-prompt-snapshot off --name orchestrator --agent orchestrator",
+          "cwd": "/home/user/projects/docs-site",
+          "name": "claude",
+          "pid": 20452
+        }
+      ],
+      "pane_id": "wV:p2",
+      "shell_pid": 17740
+    },
+    "type": "pane_process_info"
+  }
+}

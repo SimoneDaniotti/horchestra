@@ -1,0 +1,60 @@
+{
+  "id": "cli:pane:edges",
+  "result": {
+    "edges": {
+      "down": true,
+      "layout": {
+        "area": {
+          "height": 74,
+          "width": 216,
+          "x": 0,
+          "y": 0
+        },
+        "focused_pane_id": "wV:pK",
+        "panes": [
+          {
+            "focused": true,
+            "pane_id": "wV:pK",
+            "rect": {
+              "height": 74,
+              "width": 67,
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "focused": false,
+            "pane_id": "wV:p2",
+            "rect": {
+              "height": 74,
+              "width": 149,
+              "x": 67,
+              "y": 0
+            }
+          }
+        ],
+        "splits": [
+          {
+            "direction": "right",
+            "id": "split_0_root",
+            "ratio": 0.3101852,
+            "rect": {
+              "height": 74,
+              "width": 216,
+              "x": 0,
+              "y": 0
+            }
+          }
+        ],
+        "tab_id": "wV:t2",
+        "workspace_id": "wV",
+        "zoomed": false
+      },
+      "left": false,
+      "pane_id": "wV:p2",
+      "right": true,
+      "up": true
+    },
+    "type": "pane_edges"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "id": "cli:tab:list",
+  "result": {
+    "tabs": [
+      {
+        "agent_status": "idle",
+        "focused": false,
+        "label": "orchestrator",
+        "number": 2,
+        "pane_count": 2,
+        "tab_id": "wV:t2",
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "idle",
+        "focused": false,
+        "label": "backend",
+        "number": 1,
+        "pane_count": 2,
+        "tab_id": "wV:t1",
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "idle",
+        "focused": false,
+        "label": "tests",
+        "number": 3,
+        "pane_count": 2,
+        "tab_id": "wV:t3",
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "idle",
+        "focused": false,
+        "label": "reviewer",
+        "number": 4,
+        "pane_count": 2,
+        "tab_id": "wV:t4",
+        "workspace_id": "wV"
+      },
+      {
+        "agent_status": "idle",
+        "focused": false,
+        "label": "docs",
+        "number": 5,
+        "pane_count": 2,
+        "tab_id": "wV:t5",
+        "workspace_id": "wV"
+      }
+    ],
+    "type": "tab_list"
+  }
+}
