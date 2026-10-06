@@ -10,11 +10,11 @@ the agents in the tab you are looking at are highlighted.
 
 <table>
 <tr>
-<td><img src="docs/images/map-cards.png" alt="Agent map, cards view: an orchestrator and four members with live status lines" width="330"></td>
+<td><img src="docs/images/map-cards.png" alt="Agent map, cards view: an orchestrator, nested members, a needs-you flag and the details box" width="360"></td>
 <td><img src="docs/images/map-graph.png" alt="Agent map, graph view of the same team" width="420"></td>
 </tr>
 <tr>
-<td align="center"><sub>Map in every agent tab (cards)</sub></td>
+<td align="center"><sub>Map in every agent tab: cards and details box</sub></td>
 <td align="center"><sub>Same team as a graph</sub></td>
 </tr>
 </table>
@@ -101,9 +101,10 @@ to it. Press `?` in any map to see every key.
 - **compact**: one line per agent.
 - `▌` (cyan) marks agents in the map's own tab.
 - The **details box** shows the selected agent's kind, state and for how
-  long, tab, reported status, task, and the last thing it said:
+  long, tab, reported status, task, and the last thing it said.
+- `?` lists every key, in the map itself:
 
-  <img src="docs/images/details.png" alt="Details box for a selected agent" width="420">
+  <img src="docs/images/help.png" alt="The key list shown by pressing ? in a map" width="360">
 
 Icons: `✻` Claude · `◆` Codex · `✦` Gemini · `π` Pi.
 Status: `●` working · `▲` blocked · `✓` done · `○` idle · `!` needs you.
@@ -356,6 +357,10 @@ herdr plugin link .            # run your working copy
 python3 install.py install     # same as the setup action
 python3 -m unittest discover -s tests -t .
 ```
+
+README screenshots are real map output: `herdr pane read <map-pane> --format ansi
+> map.ansi`, then `python3 tools/ansi2html.py map.ansi map.html --squeeze` and a
+headless-browser screenshot of the page.
 
 ## Credits
 

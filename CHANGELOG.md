@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-10-05
 
 First version, published as Horchestra (plugin id `horchestra`; commands
 `horchestra-team` / `horchestra-tag`; `agentmap-team` / `agentmap-tag` remain
