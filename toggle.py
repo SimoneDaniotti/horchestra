@@ -62,11 +62,19 @@ def rects(layout):
 
 
 MAP_LABELS = ("horchestra-map", "Agent map")  # current and pre-0.1 pane titles
+OVERVIEW_LABEL = "horchestra-overview"
+OVERVIEW_SHARE = 0.45  # of the tab's height
 
 
 def is_map(pane):
-    """Live maps carry a token; maps restored as shells keep only the label."""
-    return bool((pane.get("tokens") or {}).get(hc.TOKEN_VIEW) or pane.get("label") in MAP_LABELS)
+    """A per-tab map. Live maps carry a token; restored ones keep the label."""
+    view = (pane.get("tokens") or {}).get(hc.TOKEN_VIEW)
+    return view == "1" or (not view and pane.get("label") in MAP_LABELS)
+
+
+def is_overview(pane):
+    view = (pane.get("tokens") or {}).get(hc.TOKEN_VIEW)
+    return view == "all" or (not view and pane.get("label") == OVERVIEW_LABEL)
 
 
 def map_panes(panes):
@@ -141,10 +149,63 @@ def open_map(panes, focused):
     return map_pane
 
 
+def toggle_overview(focused):
+    """Close any all-spaces overview, or open one along the bottom of this tab."""
+    panes = [p for p in hc.call("pane", "list").get("panes") or [] if isinstance(p, dict)]
+    existing = [p["pane_id"] for p in panes if p.get("pane_id") and is_overview(p)]
+    if existing:
+        for pane_id in existing:
+            if hc.call_quiet("plugin", "pane", "close", pane_id) is None:
+                hc.call_quiet("pane", "close", pane_id)
+        return 0
+    if not focused:
+        focused = next((p["pane_id"] for p in panes if p.get("focused")), None)
+    if not focused:
+        raise hc.HerdrError("no focused pane")
+    layout = layout_for(focused)
+    boxes = rects(layout)
+    by_id = {p.get("pane_id"): p for p in panes}
+    # Split the widest pane along the bottom edge (never a map column).
+    bottom = max((r.get("y", 0) + r.get("height", 0) for r in boxes.values()), default=0)
+    candidates = [pid for pid, r in boxes.items()
+                  if r.get("y", 0) + r.get("height", 0) == bottom and not is_map(by_id.get(pid, {}))]
+    anchor = max(candidates or [focused], key=lambda pid: boxes.get(pid, {}).get("width", 0))
+    opened = hc.call(
+        "plugin", "pane", "open",
+        "--plugin", os.environ.get("HERDR_PLUGIN_ID", "horchestra"),
+        "--entrypoint", "overview",
+        "--placement", "split",
+        "--target-pane", anchor,
+        "--direction", "down",
+        "--focus",
+    )
+    pane_id = ((opened.get("plugin_pane") or {}).get("pane") or {}).get("pane_id")
+    if not pane_id:
+        return 0
+    tab_h = (layout.get("area") or {}).get("height") or bottom
+    target = max(14, int(tab_h * OVERVIEW_SHARE))
+    for _ in range(3):
+        boxes = rects(layout_for(pane_id))
+        mine, other = boxes.get(pane_id), boxes.get(anchor)
+        if not mine or not other:
+            break
+        total = mine.get("height", 0) + other.get("height", 0)
+        excess = mine.get("height", 0) - target
+        if total <= 0 or abs(excess) <= 1:
+            break
+        direction = "down" if excess > 0 else "up"
+        if hc.call_quiet("pane", "resize", "--direction", direction,
+                         "--amount", f"{abs(excess) / total:.4f}", "--pane", pane_id) is None:
+            break
+    return 0
+
+
 def main():
     ctx = context()
     workspace = find(ctx, "HERDR_WORKSPACE_ID", "workspace_id")
     focused = find(ctx, "HERDR_PANE_ID", "pane_id", "focused_pane_id")
+    if "--overview" in sys.argv[1:]:
+        return toggle_overview(focused)
     if not workspace and focused:
         workspace = hc.get_pane(focused).get("workspace_id")
     if not workspace:

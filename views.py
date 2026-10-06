@@ -17,6 +17,7 @@ KINDS = {
     "cursor": ("◈", "kind:other"),
     "copilot": ("◎", "kind:other"),
     "shell": ("$", "dim"),
+    "space": ("◼", "accent"),
 }
 DEFAULT_KIND = ("▪", "kind:other")
 

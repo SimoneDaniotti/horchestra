@@ -16,6 +16,12 @@ contexts = ["workspace"]
 command = ["python3", "toggle.py"]
 
 [[actions]]
+id = "overview"
+title = "Toggle all-spaces agent map"
+contexts = ["workspace"]
+command = ["python3", "toggle.py", "--overview"]
+
+[[actions]]
 id = "team-up"
 title = "Start this space's agent team"
 contexts = ["workspace"]
@@ -38,3 +44,9 @@ id = "map"
 title = "horchestra-map"
 placement = "split"
 command = ["python3", "agentmap.py"]
+
+[[panes]]
+id = "overview"
+title = "horchestra-overview"
+placement = "split"
+command = ["python3", "agentmap.py", "--all"]

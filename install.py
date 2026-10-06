@@ -7,8 +7,8 @@ outside the plugin directory, and `teardown` removes exactly that:
 - `horchestra-team` and `horchestra-tag` symlinks in ~/.local/bin (plus the
   deprecated `agentmap-team` / `agentmap-tag` aliases, kept for one version)
 - the `orchestrator` Claude Code session agent in ~/.claude/agents
-- a `prefix+m` binding for the map toggle, in a marked block of Herdr's
-  config.toml (only if that key is free)
+- `prefix+m` (maps in this space) and `prefix+shift+m` (all-spaces
+  overview), in a marked block of Herdr's config.toml (only keys that are free)
 
 It never overwrites files it did not create, and only suggests (never
 writes) personal settings such as notifications.
@@ -25,13 +25,15 @@ ROOT = os.environ.get("HERDR_PLUGIN_ROOT") or os.path.dirname(os.path.realpath(_
 HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 BIN_DIR = os.path.expanduser("~/.local/bin")
 AGENTS_DIR = os.path.expanduser("~/.claude/agents")
-TOGGLE_KEY = "prefix+m"
-TOGGLE_COMMAND = "horchestra.toggle"
+# (key, plugin action, description, older action names that count as bound)
+BINDINGS = [
+    ("prefix+m", "horchestra.toggle", "toggle agent maps", ("agent-map.toggle",)),
+    ("prefix+shift+m", "horchestra.overview", "all-spaces agent map", ()),
+]
 BLOCK_START = "# >>> horchestra (managed by horchestra.setup; remove with horchestra.teardown)"
 BLOCK_END = "# <<< horchestra"
 # Any managed block, including ones written under the pre-0.1 names.
 BLOCK_RE = re.compile(r"# >>> (?:horchestra|herdr-orchestra)\b.*?# <<< (?:horchestra|herdr-orchestra)[^\n]*\n?", re.S)
-LEGACY_TOGGLE_COMMANDS = ("agent-map.toggle",)
 
 # (source relative to the plugin root, destination)
 LINKS = [
@@ -101,16 +103,12 @@ def remove_links(report):
 # ---- config block -----------------------------------------------------------
 
 
-def managed_block():
-    return "\n".join([
-        BLOCK_START,
-        "[[keys.command]]",
-        f'key = "{TOGGLE_KEY}"',
-        'type = "plugin_action"',
-        f'command = "{TOGGLE_COMMAND}"',
-        'description = "toggle agent map"',
-        BLOCK_END,
-    ])
+def managed_block(bindings=None):
+    lines = [BLOCK_START]
+    for key, command, description, _legacy in bindings or BINDINGS:
+        lines += ["[[keys.command]]", f'key = "{key}"', 'type = "plugin_action"',
+                  f'command = "{command}"', f'description = "{description}"']
+    return "\n".join(lines + [BLOCK_END])
 
 
 def strip_block(text):
@@ -126,28 +124,36 @@ def key_in_use(text, key):
                re.search(r'=\s*"' + re.escape(key) + '"', l) for l in active_lines(text))
 
 
-def toggle_bound_elsewhere(text):
-    commands = (TOGGLE_COMMAND,) + LEGACY_TOGGLE_COMMANDS
-    return any(re.fullmatch(r'command\s*=\s*"(' + "|".join(map(re.escape, commands)) + ')"', l)
-               for l in active_lines(text))
+def command_bound(text, commands):
+    pattern = r'command\s*=\s*"(' + "|".join(map(re.escape, commands)) + ')"'
+    return any(re.fullmatch(pattern, l) for l in active_lines(text))
 
 
 def add_block(text):
-    """Return (new_text, message). Pure, for tests."""
-    if managed_block() in text:
-        return text, f"ok       {TOGGLE_KEY} binding already managed by setup"
-    if BLOCK_RE.search(text):
-        # A block from an older version: rewrite it with the current names.
-        stripped = strip_block(text)
-        new, _ = add_block(stripped)
-        return new, f"updated  {TOGGLE_KEY} binding to the current plugin name"
-    if toggle_bound_elsewhere(text):
-        return text, "ok       the map toggle is already bound in your config"
-    if key_in_use(text, TOGGLE_KEY):
-        return text, (f"SKIPPED  {TOGGLE_KEY} is already used in your config; bind "
-                      f"{TOGGLE_COMMAND} to another key yourself (see README)")
-    sep = "" if text.endswith("\n\n") or not text else ("\n" if text.endswith("\n") else "\n\n")
-    return text + sep + managed_block() + "\n", f"added    {TOGGLE_KEY} -> map toggle"
+    """Return (new_text, message). Pure, for tests.
+
+    Rebuilds the managed block from scratch, skipping any binding whose key
+    is taken or whose action the user already bound outside the block.
+    """
+    base = strip_block(text)
+    chosen, notes = [], []
+    for key, command, description, legacy in BINDINGS:
+        if command_bound(base, (command,) + legacy):
+            notes.append(f"ok       {command} is already bound in your config")
+        elif key_in_use(base, key):
+            notes.append(f"SKIPPED  {key} is already used in your config; bind {command} "
+                         "to another key yourself (see README)")
+        else:
+            chosen.append((key, command, description, legacy))
+    body = base.rstrip("\n")
+    new = ((body + "\n\n") if body else "") + managed_block(chosen) + "\n" if chosen else base
+    if new == text:
+        notes.append("ok       key bindings already managed by setup")
+    elif BLOCK_RE.search(text):
+        notes.append("updated  key bindings: " + ", ".join(f"{k} -> {d}" for k, _, d, _ in chosen))
+    elif chosen:
+        notes.append("added    " + ", ".join(f"{k} -> {d}" for k, _, d, _ in chosen))
+    return new, "\n".join(notes)
 
 
 def install_binding(report):
@@ -170,7 +176,7 @@ def remove_binding(report):
         with open(path, "w") as fh:
             fh.write(new)
         reload_config(report)
-        report(f"removed  {TOGGLE_KEY} binding from {path}")
+        report(f"removed  key bindings from {path}")
 
 
 def reload_config(report):

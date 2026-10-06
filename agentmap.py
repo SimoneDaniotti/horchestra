@@ -86,6 +86,69 @@ def build_forest(panes, own_pane_id, tab_id, collapsed, selected):
     return roots, raw
 
 
+def build_overview(panes, workspaces, own_pane_id, own_workspace, collapsed, selected):
+    """One root per space (workspace), with that space's agent tree under it."""
+    by_ws = {}
+    for pane in panes:
+        by_ws.setdefault(pane.get("workspace_id"), []).append(pane)
+    roots, raw = [], {}
+    for ws in sorted(workspaces, key=lambda w: w.get("number") or 0):
+        wid = ws.get("workspace_id")
+        if not wid:
+            continue
+        team, team_raw = build_forest(by_ws.get(wid, []), own_pane_id, None, collapsed, selected)
+        count = len(visible_order(team))
+        key = "ws:" + wid
+        node = views.NodeView(key, ws.get("label") or wid, "space", ws.get("agent_status"),
+                              f"{count} agent{'s' * (count != 1)}" if count else "no agents",
+                              here=wid == own_workspace)
+        node.collapsed = key in collapsed
+        node.selected = key == selected
+        for child in team:
+            child.parent = node
+        node.children = team
+        roots.append(node)
+        raw.update(team_raw)
+    return roots, raw
+
+
+def herdr_prefix():
+    """The user's Herdr prefix key, for the help overlay (best effort)."""
+    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                        "herdr", "config.toml")
+    try:
+        import tomllib
+
+        with open(path, "rb") as fh:
+            prefix = (tomllib.load(fh).get("keys") or {}).get("prefix")
+        return prefix if isinstance(prefix, str) and prefix else "ctrl+b"
+    except (OSError, ValueError, ImportError):
+        return "ctrl+b"
+
+
+def help_lines(overview):
+    prefix = herdr_prefix()
+    go = "go to space / focus agent" if overview else "focus agent's pane"
+    return [
+        ("KEYS IN THIS MAP", None),
+        ("w s  ↑ ↓  k j", "move selection"),
+        ("a d  ← →  h l", "parent / first child"),
+        ("Enter, dbl-click", go),
+        ("click, wheel", "select / move"),
+        ("Space", "fold or unfold"),
+        ("v", "view: auto, cards, graph, compact"),
+        ("i", "details box"),
+        ("r", "refresh"),
+        ("q", "close this map"),
+        ("?", "show / hide this help"),
+        ("", None),
+        (f"HERDR KEYS (prefix = {prefix})", None),
+        ("prefix m", "maps in every agent tab of this space"),
+        ("prefix M", "all-spaces overview (this view)" if overview else "all-spaces overview"),
+        ("prefix z", "zoom this pane (wide graph)"),
+    ]
+
+
 def visible_order(roots):
     out = []
 
@@ -149,8 +212,11 @@ def wrap(text, width, lines):
 
 
 class App:
-    def __init__(self, screen):
+    def __init__(self, screen, overview=False):
         self.screen = screen
+        self.overview = overview
+        self.workspaces = []
+        self.show_help = False
         self.own_pane = os.environ.get("HERDR_PANE_ID", "")
         self.workspace_id = os.environ.get("HERDR_WORKSPACE_ID", "")
         self.tab_id = os.environ.get("HERDR_TAB_ID", "")
@@ -162,7 +228,7 @@ class App:
         self.order = []
         self.selected = None
         self.collapsed = set()
-        self.mode = "auto"
+        self.mode = "graph" if overview else "auto"
         self.show_details = True
         self.scroll_y = 0
         self.scroll_x = 0
@@ -185,8 +251,18 @@ class App:
                 me = hc.get_pane(self.own_pane)
                 self.workspace_id = me.get("workspace_id") or self.workspace_id
                 self.tab_id = me.get("tab_id") or self.tab_id
-                if not tokens_of(me).get(hc.TOKEN_VIEW):
-                    hc.set_tokens(self.own_pane, {hc.TOKEN_VIEW: "1"})
+                view = "all" if self.overview else "1"
+                if tokens_of(me).get(hc.TOKEN_VIEW) != view:
+                    hc.set_tokens(self.own_pane, {hc.TOKEN_VIEW: view})
+            if self.overview:
+                self.workspaces = [w for w in hc.call("workspace", "list").get("workspaces") or []
+                                   if isinstance(w, dict)]
+                self.workspace_label = f"all spaces ({len(self.workspaces)})"
+                self.panes = [p for p in hc.call("pane", "list").get("panes") or [] if isinstance(p, dict)]
+                self.tabs = {}
+                self.error = ""
+                self._after_refresh()
+                return
             if not self.workspace_id:
                 raise hc.HerdrError("no workspace context")
             ws = hc.get_workspace(self.workspace_id)
@@ -198,6 +274,9 @@ class App:
         except hc.HerdrError as exc:
             self.error = str(exc)[:120]
             return
+        self._after_refresh()
+
+    def _after_refresh(self):
         now = time.monotonic()
         for pane in self.panes:
             key, status = pane.get("pane_id"), pane.get("agent_status")
@@ -210,9 +289,14 @@ class App:
         self.rebuild()
 
     def rebuild(self):
-        self.roots, self.raw = build_forest(
-            self.panes, self.own_pane, self.tab_id, self.collapsed, self.selected
-        )
+        if self.overview:
+            self.roots, self.raw = build_overview(
+                self.panes, self.workspaces, self.own_pane, self.workspace_id,
+                self.collapsed, self.selected)
+        else:
+            self.roots, self.raw = build_forest(
+                self.panes, self.own_pane, self.tab_id, self.collapsed, self.selected
+            )
         self.order = visible_order(self.roots)
         keys = [n.key for n in self.order]
         if self.selected not in keys:
@@ -225,6 +309,8 @@ class App:
         return next((n for n in self.order if n.key == key), None)
 
     def message_for(self, key):
+        if key.startswith("ws:"):
+            return ""
         cached = self.messages.get(key)
         if cached and time.monotonic() - cached[0] < POLL_SECONDS:
             return cached[1]
@@ -247,6 +333,8 @@ class App:
     def effective_mode(self, width):
         if self.mode != "auto":
             return self.mode
+        if self.overview:
+            return "graph"  # spaces side by side; scrolls horizontally
         if width >= GRAPH_MIN_WIDTH and views.graph_width(self.roots) <= width:
             return "graph"
         return "cards"
@@ -257,7 +345,7 @@ class App:
         attr = self.styles
         mode = self.effective_mode(w)
 
-        self.put(0, 1, "AGENT MAP", curses.A_BOLD)
+        self.put(0, 1, "ALL SPACES" if self.overview else "AGENT MAP", curses.A_BOLD)
         tag = f"[{mode}]" if self.mode == "auto" else f"[{mode}*]"
         self.put(0, w - len(tag) - 1, tag, attr["dim"])
         self.put(1, 1, self.workspace_label, attr["accent"] | curses.A_BOLD)
@@ -282,11 +370,14 @@ class App:
         view_h = max(0, bottom - top)
         self.hits = []
 
-        if self.error:
+        if self.show_help:
+            details = 0
+            self.draw_help(top, h - footer, w)
+        elif self.error:
             self.put(top, 1, "herdr unavailable, retrying…", attr["status:blocked"])
             self.put(top + 1, 1, self.error, attr["dim"])
         elif not self.order:
-            self.put(top, 1, "no agents in this space", attr["dim"])
+            self.put(top, 1, "no spaces" if self.overview else "no agents in this space", attr["dim"])
             self.put(top + 2, 1, "start one with:", attr["dim"])
             self.put(top + 3, 1, "claude --agent orchestrator", attr["dim"])
         else:
@@ -295,12 +386,14 @@ class App:
             canvas, boxes = renderer(self.roots, w)
             self.blit(canvas, boxes, top, view_h, w)
 
-        if details:
-            self.draw_details(bottom, details, w)
+        if details and not self.show_help:
+            self.draw_details(h - footer - details, details, w)
         if footer:
             self.put(h - 2, 0, "─" * w, attr["dim"])
             self.put(h - 1, 0, "▌", attr["here"])
-            self.put(h - 1, 1, "this tab  wasd move  v view  i info", attr["dim"])
+            here = "this space" if self.overview else "this tab"
+            # Most important first: narrow maps cut the end of this line.
+            self.put(h - 1, 1, f"{here}  ? keys  wasd move  v view", attr["dim"])
         self.screen.noutrefresh()
         curses.doupdate()
 
@@ -327,6 +420,19 @@ class App:
             self.hits.append((top + y0 - self.scroll_y, top + y1 - self.scroll_y,
                               x0 - self.scroll_x, x1 - self.scroll_x, key))
 
+    def draw_help(self, top, bottom, w):
+        attr = self.styles
+        row = top
+        for key, text in help_lines(self.overview):
+            if row >= bottom:
+                break
+            if text is None:
+                self.put(row, 1, key, attr["accent"] | curses.A_BOLD)
+            else:
+                self.put(row, 2, key, curses.A_BOLD)
+                self.put(row, 20, text[: max(0, w - 21)], attr["dim"])
+            row += 1
+
     def draw_details(self, y, rows, w):
         attr = self.styles
         node = self.node(self.selected)
@@ -335,6 +441,9 @@ class App:
         self.put(y, 0, "─" * w, attr["dim"])
         self.put(y, 2, title, attr["accent"] | curses.A_BOLD)
         if not node:
+            return
+        if node.key.startswith("ws:"):
+            self.put(y + 1, 1, f"space · {node.detail} · Enter to switch to it"[: w - 2], attr["dim"])
             return
         tokens = tokens_of(pane)
         status, since = self.since.get(node.key, (node.status, time.monotonic()))
@@ -397,7 +506,11 @@ class App:
             self.select(node.children[0].key)
 
     def activate(self):
-        if self.selected:
+        if not self.selected:
+            return
+        if self.selected.startswith("ws:"):
+            hc.call_quiet("workspace", "focus", self.selected[3:])
+        else:
             hc.focus_pane(self.selected)
 
     def on_mouse(self):
@@ -424,6 +537,12 @@ class App:
             self.activate()
 
     def handle(self, key):
+        if self.show_help and key in (ord("?"), ord("q"), 27):
+            self.show_help = False
+            return True
+        if key == ord("?"):
+            self.show_help = True
+            return True
         if key == ord("q"):
             return False
         if key in (curses.KEY_UP, ord("w"), ord("k")):
@@ -533,14 +652,14 @@ def make_styles():
     }
 
 
-def setup(screen):
+def setup(screen, overview=False):
     curses.curs_set(0)
     curses.use_default_colors()
     curses.mousemask(curses.ALL_MOUSE_EVENTS)
     curses.mouseinterval(0)
     screen.timeout(200)
     screen.keypad(True)
-    app = App(screen)
+    app = App(screen, overview=overview)
     app.styles = make_styles()
     app.run()
 
@@ -554,7 +673,7 @@ def main():
     os.environ.pop("COLUMNS", None)
     curses.use_env(False)
     try:
-        curses.wrapper(setup)
+        curses.wrapper(setup, "--all" in sys.argv[1:])
     except KeyboardInterrupt:
         pass
 

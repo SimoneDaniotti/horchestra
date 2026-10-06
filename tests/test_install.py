@@ -16,11 +16,19 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(install.add_block(added)[0], added)  # idempotent
         self.assertEqual(install.strip_block(added).rstrip(), CONFIG.rstrip())
 
-    def test_key_in_use_or_already_bound_is_left_alone(self):
+    def test_taken_key_or_bound_action_is_skipped_but_others_added(self):
         taken = CONFIG + '[[keys.command]]\nkey = "prefix+m"\ntype = "shell"\ncommand = "x"\n'
-        self.assertEqual(install.add_block(taken)[0], taken)
-        bound = CONFIG + '[[keys.command]]\nkey = "prefix+t"\ncommand = "horchestra.toggle"\n'
-        self.assertEqual(install.add_block(bound)[0], bound)
+        new, message = install.add_block(taken)
+        self.assertIn("SKIPPED  prefix+m", message)
+        self.assertNotIn('command = "horchestra.toggle"', new)
+        self.assertIn('command = "horchestra.overview"', new)
+        for bound_as in ("horchestra.toggle", "agent-map.toggle"):
+            bound = CONFIG + '[[keys.command]]\nkey = "prefix+t"\ncommand = "%s"\n' % bound_as
+            new, _ = install.add_block(bound)
+            self.assertNotIn('key = "prefix+m"', new)
+            self.assertIn('key = "prefix+shift+m"', new)
+        everything = taken + '[[keys.command]]\nkey = "prefix+shift+m"\ncommand = "y"\n'
+        self.assertEqual(install.add_block(everything)[0], everything)
 
     def test_commented_key_does_not_count(self):
         self.assertFalse(install.key_in_use('# key = "prefix+m"\n', "prefix+m"))
