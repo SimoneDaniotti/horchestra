@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-10-06
 
 - Live edges: the edge into a working agent lights up and a pulse runs from
   parent to child, in every map view (an `animate` config file set to `off`

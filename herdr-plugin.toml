@@ -1,6 +1,6 @@
 id = "horchestra"
 name = "Horchestra"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.3"
 description = "Orchestrator-led agent teams per space, with a live agent map in every tab"
 platforms = ["linux", "macos"]
