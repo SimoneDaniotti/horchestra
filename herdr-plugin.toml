@@ -50,3 +50,11 @@ id = "overview"
 title = "horchestra-overview"
 placement = "split"
 command = ["python3", "agentmap.py", "--all"]
+
+# Opened by the map's `z` key over the selected agent's pane: its session in
+# zoetrope. Overlay: closing it restores focus and zoom.
+[[panes]]
+id = "zoom"
+title = "horchestra-zoom"
+placement = "overlay"
+command = ["python3", "zoom.py"]
