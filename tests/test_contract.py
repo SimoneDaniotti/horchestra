@@ -965,7 +965,9 @@ def parse_source(path):
 
 def plugin_sources():
     files = [os.path.join(ROOT, f) for f in sorted(os.listdir(ROOT)) if f.endswith(".py")]
-    files += [os.path.join(ROOT, "bin", f) for f in sorted(os.listdir(os.path.join(ROOT, "bin")))]
+    bin_dir = os.path.join(ROOT, "bin")
+    # Files only: compiling bin/ scripts creates a bin/__pycache__ directory.
+    files += [os.path.join(bin_dir, f) for f in sorted(os.listdir(bin_dir)) if os.path.isfile(os.path.join(bin_dir, f))]
     return files
 
 
