@@ -869,6 +869,10 @@ def show_maps(space, force=False, log=print):
 def replace_dead_maps(space, log=print):
     """Map panes come back from a restart as idle shells; reopen them."""
     space.refresh()
+    for p in space.panes:
+        # A restored overview is just an idle shell; prefix+M reopens it.
+        if p.get("label") == "horchestra-overview" and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW):
+            hc.call_quiet("pane", "close", p["pane_id"])
     dead = [
         p["pane_id"] for p in space.panes
         if p.get("label") in MAP_LABELS and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW)
@@ -1080,6 +1084,102 @@ def cmd_respawn(args):
     sync(space, spawn=False, log=lambda _msg: None)
 
 
+# ---- reopen -------------------------------------------------------------
+
+
+def session_on_disk(kind, session):
+    """Whether the agent CLI still has this conversation to resume."""
+    import glob
+
+    if kind == "claude":
+        return bool(glob.glob(os.path.expanduser(f"~/.claude/projects/*/{session}.jsonl")))
+    if kind == "codex":
+        pattern = os.path.expanduser(f"~/.codex/sessions/**/*{session}*.jsonl")
+        return bool(glob.glob(pattern, recursive=True))
+    return False
+
+
+def resume_launch(space, role, kind, session):
+    """Launch args that resume `session` with the role's current profile."""
+    entry = space.entry(role)
+    if kind == "claude":
+        launch = (orchestrator_args(space, space.team) if role == ORCHESTRATOR
+                  else member_args(space, entry, load_profile(space, entry)))
+        return ["--resume", session, "--system-prompt-snapshot", "off", *launch]
+    # codex resume [OPTIONS] [SESSION_ID]
+    return ["resume", *[str(a) for a in entry.get("args", [])], session]
+
+
+def cmd_reopen(args):
+    """Recreate a closed space from team.toml, resuming every agent's conversation."""
+    path = args.file or os.environ.get("HORCHESTRA_TEAM_FILE") or find_team_file(os.getcwd())
+    if not path:
+        raise TeamError(f"no {TEAM_FILE} found from {os.getcwd()}; cd into the project or pass --file")
+    path = os.path.abspath(path)
+    team = load(path)
+    register(path)
+    root = os.path.dirname(path)
+    entries = [(ORCHESTRATOR, team["orchestrator"])] + [(m["role"], m) for m in team["member"]]
+    sessions = {e.get("session") for _, e in entries if e.get("session")}
+    everywhere = hc.call("pane", "list").get("panes") or []
+    open_now = [p for p in everywhere if isinstance(p, dict) and p.get("agent") and session_of(p) in sessions]
+    if open_now:
+        where = sorted({p.get("workspace_id", "?") for p in open_now})
+        raise TeamError(f"this team is still running in space(s) {', '.join(where)}; "
+                        "close it first, or use `respawn` to refresh agents in place")
+
+    label = args.label or os.path.basename(root)
+    created = hc.call("workspace", "create", "--label", label, "--cwd", root, "--focus")
+    workspace = created["workspace"]["workspace_id"]
+    first_pane = created["root_pane"]["pane_id"]
+    hc.call_quiet("tab", "rename", created["tab"]["tab_id"], ORCHESTRATOR)
+    space = Space(workspace, path, team)
+    print(f"reopening {label} in space {workspace}…")
+
+    resumed, fresh, failed = [], [], []
+    for index, (role, entry) in enumerate(entries):
+        kind = entry.get("kind") or team.get("default_kind", "claude")
+        cwd = os.path.join(root, entry.get("cwd", "")) if entry.get("cwd") else root
+        try:
+            if index == 0:
+                pane_id = first_pane
+            else:
+                pane_id = hc.call("tab", "create", "--workspace", workspace, "--label", role,
+                                  "--cwd", cwd)["root_pane"]["pane_id"]
+            hc.call("pane", "rename", pane_id, LABEL_PREFIX + role)
+            session = entry.get("session")
+            if session and kind in ("claude", "codex") and session_on_disk(kind, session):
+                print(f"  {role}: resuming its conversation…")
+                start_agent(space.agent_name(role), kind, pane_id, resume_launch(space, role, kind, session))
+                resumed.append(role)
+            else:
+                print(f"  {role}: no saved conversation; starting fresh…")
+                space.refresh()
+                if role == ORCHESTRATOR:
+                    start_orchestrator(space, team, {"pane_id": pane_id, "workspace_id": workspace})
+                else:
+                    spawn_member(space, team, entry)
+                fresh.append(role)
+        except (TeamError, hc.HerdrError) as exc:
+            print(f"  {role}: FAILED: {exc}")
+            failed.append(role)
+
+    space.refresh()
+    sync(space, spawn=False, log=lambda _msg: None)
+    show_maps(space, force=True)
+    orch = space.pane(ORCHESTRATOR)
+    if orch and orch.get("agent") and ORCHESTRATOR not in failed:
+        note = "[horchestra] This space was reopened from team.toml. "
+        note += f"Resumed with their conversations: {', '.join(resumed) or 'none'}. "
+        if fresh:
+            note += f"Started fresh (no saved conversation): {', '.join(fresh)}. "
+        if failed:
+            note += f"Could not start: {', '.join(failed)}. "
+        note += "Run `horchestra-team status` before continuing."
+        deliver(orch["pane_id"], note)
+    print(f"done: resumed {len(resumed)}, fresh {len(fresh)}, failed {len(failed)}")
+
+
 def cmd_sync(args):
     space, pane = resolve_space(args.file)
     sync(space, near_pane=pane)
@@ -1174,6 +1274,9 @@ def main(argv=None):
     sub.add_parser("scan", help="list running agents in this space that are not on the team").set_defaults(func=cmd_scan)
     sub.add_parser("sync", help="apply team.toml: start missing members, repair tags").set_defaults(func=cmd_sync)
     sub.add_parser("roles", help="list role profiles (.orchestra/roles) and who uses them").set_defaults(func=cmd_roles)
+    reopen = sub.add_parser("reopen", help="recreate a closed space from team.toml, resuming every agent")
+    reopen.add_argument("--label", help="space name (default: the project folder name)")
+    reopen.set_defaults(func=cmd_reopen)
     resp = sub.add_parser("respawn", help="restart a Claude agent with its current profile, keeping its conversation")
     resp.add_argument("role", nargs="?")
     resp.add_argument("--all", action="store_true", help="every Claude member")
