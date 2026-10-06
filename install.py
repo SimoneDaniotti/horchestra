@@ -20,11 +20,19 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+
+try:
+    import tomllib
+except ImportError:  # pragma: no cover - Python < 3.11
+    tomllib = None
 
 ROOT = os.environ.get("HERDR_PLUGIN_ROOT") or os.path.dirname(os.path.realpath(__file__))
 HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 BIN_DIR = os.path.expanduser("~/.local/bin")
-AGENTS_DIR = os.path.expanduser("~/.claude/agents")
+DEFAULT_AGENTS_DIR = os.path.expanduser("~/.claude/agents")
+# Claude Code reads agents from $CLAUDE_CONFIG_DIR/agents when that is set.
+AGENTS_DIR = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "agents")
 # (key, plugin action, description, older action names that count as bound)
 BINDINGS = [
     ("prefix+m", "horchestra.toggle", "toggle agent maps", ("agent-map.toggle",)),
@@ -47,6 +55,9 @@ LEGACY_LINKS = [
     ("bin/agentmap-team", os.path.join(BIN_DIR, "agentmap-team")),
     ("bin/agentmap-tag", os.path.join(BIN_DIR, "agentmap-tag")),
 ]
+if os.path.realpath(AGENTS_DIR) != os.path.realpath(DEFAULT_AGENTS_DIR):
+    # Set up before CLAUDE_CONFIG_DIR was set: teardown still removes that link.
+    LEGACY_LINKS.append(("agents/orchestrator.md", os.path.join(DEFAULT_AGENTS_DIR, "orchestrator.md")))
 
 
 def read(path):
@@ -64,17 +75,71 @@ def config_path():
 # ---- symlinks -------------------------------------------------------------
 
 
-# Paths used by pre-0.1 development layouts, recognised as ours on upgrade.
-LEGACY_SUFFIXES = {"agents/orchestrator.md": ["herdr-agent-map/orchestrator.md"]}
+# Plugin ids whose checkouts we treat as ours (current and pre-0.1 name).
+PLUGIN_IDS = ("horchestra", "agent-map")
+# The one pre-0.1 development layout recognised without a manifest: the old
+# checkout folder is gone, so only a dangling link with this exact folder
+# name and file name counts.
+LEGACY_DANGLING = {"agents/orchestrator.md": ["herdr-agent-map/orchestrator.md"]}
+
+
+def manifest_id(root):
+    """The `id` in <root>/herdr-plugin.toml, or None if unreadable."""
+    path = os.path.join(root, "herdr-plugin.toml")
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    if tomllib is not None:
+        try:
+            value = tomllib.loads(data.decode("utf-8")).get("id")
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+            return None
+        return value if isinstance(value, str) else None
+    match = re.search(r'^id\s*=\s*"([^"]*)"', data.decode("utf-8", "replace"), re.M)
+    return match.group(1) if match else None
+
+
+def plugin_root_of(target, source_rel):
+    """The directory `target` would be the `source_rel` file of, or None."""
+    parts = source_rel.split("/")
+    path = os.path.normpath(target)
+    for part in reversed(parts):
+        head, tail = os.path.split(path)
+        if tail != part:
+            return None
+        path = head
+    return path
+
+
+def is_plugin_root(root):
+    return bool(root) and manifest_id(root) in PLUGIN_IDS
 
 
 def is_ours(dest, source_rel):
-    """A symlink into some copy of this plugin (e.g. an older checkout)."""
+    """A symlink to <plugin_root>/<source_rel> of some copy of this plugin.
+
+    Ownership is strict because setup replaces and teardown deletes what
+    this returns True for: a user's own link that merely ends in the same
+    file name (dotfiles, another tool) must never count. The target's
+    directory must hold a herdr-plugin.toml with our id, checked both as
+    written and fully resolved. A dangling link counts only through that
+    manifest (its file was dropped from a still-present checkout) or the
+    exact pre-0.1 `herdr-agent-map` dev layout.
+    """
     if not os.path.islink(dest):
         return False
-    target = os.readlink(dest).replace(os.sep, "/")
-    suffixes = [source_rel] + LEGACY_SUFFIXES.get(source_rel, [])
-    return any(target.endswith("/" + suffix) for suffix in suffixes)
+    target = os.path.join(os.path.dirname(dest), os.readlink(dest))
+    candidates = [target]
+    if os.path.exists(target):
+        candidates.append(os.path.realpath(target))
+    if any(is_plugin_root(plugin_root_of(c, source_rel)) for c in candidates):
+        return True
+    if os.path.exists(target):
+        return False
+    norm = os.path.normpath(target).replace(os.sep, "/")
+    return any(norm.endswith("/" + legacy) for legacy in LEGACY_DANGLING.get(source_rel, []))
 
 
 def install_links(report):
@@ -167,8 +232,8 @@ def install_binding(report):
     new, message = add_block(text)
     if new != text:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as fh:
-            fh.write(new)
+        if not write_config(path, text, new, report):
+            return
         reload_config(report)
     report(message)
 
@@ -178,10 +243,58 @@ def remove_binding(report):
     text = read(path)
     new = strip_block(text)
     if new != text:
-        with open(path, "w") as fh:
-            fh.write(new)
+        if not write_config(path, text, new, report):
+            return
         reload_config(report)
         report(f"removed  key bindings from {path}")
+
+
+def parses_as_toml(text):
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return False
+    return True
+
+
+def write_config(path, old, new, report):
+    """Replace Herdr's config atomically; return False if nothing was written.
+
+    The config is the user's, so a crash or full disk must never leave it
+    truncated: write a sibling temp file, fsync it, keep the original mode
+    and os.replace it in. A symlinked config (dotfiles) is written through
+    to its target so the link survives. If our edit would turn valid TOML
+    into invalid TOML, refuse and leave the file untouched.
+    """
+    if tomllib is not None and parses_as_toml(old) and not parses_as_toml(new):
+        report(f"ERROR    not writing {path}: the edited config would not be valid TOML; "
+               "your config was left untouched")
+        return False
+    path = os.path.realpath(path)
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".config.toml.", suffix=".tmp", dir=os.path.dirname(path))
+        with os.fdopen(fd, "w") as fh:
+            fh.write(new)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except OSError as err:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        report(f"ERROR    could not write {path}: {err}")
+        return False
+    return True
 
 
 def reload_config(report):
