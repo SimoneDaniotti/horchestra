@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # One Linux job covers every supported Python sequentially: private repos
-  # get few concurrent runners, and a wide matrix leaves jobs stuck in queue.
+  # One Linux job covers every supported Python sequentially: fewer jobs
+  # queue less and finish faster than a wide matrix.
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -23,14 +23,33 @@ jobs:
             3.11
             3.12
             3.13
+      # coverage.py is a CI-only tool; the plugin itself stays dependency-free.
+      - name: Install coverage
+        run: python3.13 -m pip install coverage
+      # 3.13 runs the suite under coverage; the other versions run it plain.
       - name: Test on each Python
         run: |
           for v in 3.11 3.12 3.13; do
             echo "::group::Python $v"
             python$v -m py_compile *.py bin/horchestra-team bin/horchestra-tag
-            python$v -W error::ResourceWarning -m unittest discover -s tests -t .
+            if [ "$v" = "3.13" ]; then
+              python$v -W error::ResourceWarning -m coverage run --source=. --omit='tests/*,tools/*' -m unittest discover -s tests -t .
+            else
+              python$v -W error::ResourceWarning -m unittest discover -s tests -t .
+            fi
             echo "::endgroup::"
           done
+      - name: Coverage report
+        run: |
+          python3.13 -m coverage report
+          python3.13 -m coverage xml -o coverage.xml
+      # Codecov problems (e.g. no token yet) must never fail CI.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false
 
   macos:
     runs-on: macos-latest
