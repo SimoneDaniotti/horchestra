@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Live edges: the edge into a working agent lights up and a pulse runs from
+  parent to child, in every map view (an `animate` config file set to `off`
+  turns it off). Reports run a green pulse back up to the parent (red for
+  needs-you), and `message` runs a magenta pulse from sender to receiver.
+- Activity plot under the map (`t`, window with `[` `]`): one sparkline per
+  agent, or per space in the overview, read from Claude and Codex session
+  transcripts.
+- `z` zooms into the selected agent's session with zoetrope, over the map.
+- Shift+W/A/S/D in a map docks every map in the space at the top, left,
+  bottom or right (and moves the overview the same way); the side is
+  remembered. The footer now suggests `z zoom`.
+- Herdr errors are shown as `code: message` instead of raw JSON, and error
+  codes are matched exactly.
+
 ## 0.1.0 — 2026-10-05
 
 First version, published as Horchestra (plugin id `horchestra`; commands

@@ -101,6 +101,10 @@ to it. Press `?` in any map to see every key.
 | `Space` | fold or unfold a subtree |
 | `v` | cycle views: auto → cards → graph → compact |
 | `i` | show or hide the details box (info) |
+| `t` | show or hide the activity plot |
+| `[` `]` | activity plot: shorter / longer window (10m · 30m · 1h · 3h · 12h) |
+| `z` | zoom into the selected agent's session with [zoetrope](https://github.com/furkankly/zoetrope) |
+| `W` `A` `S` `D` (shift) | dock the maps (or the overview) at the top / left / bottom / right; remembered |
 | `r` / `q` | refresh / close this map |
 | `?` | show or hide the list of keys |
 
@@ -110,6 +114,28 @@ to it. Press `?` in any map to see every key.
   e.g. when you zoom the map pane with `prefix+z`.
 - **compact**: one line per agent.
 - `▌` (cyan) marks agents in the map's own tab.
+- **Live edges**, in every view (see Configuration to keep them still):
+  - yellow, parent → child: the child is working;
+  - green, child → parent: the child just reported (`horchestra-team report`);
+  - red, child → parent: the child needs you (`report --needs-you`);
+  - magenta, sender → receiver: a `horchestra-team message`; between two
+    members it runs up to their common parent and down again.
+
+  Report and message pulses run for about 6 seconds. Text the orchestrator
+  types into a member with Herdr's own `agent prompt` shows only as the
+  yellow working pulse.
+- The **activity plot** under the map has one line per agent (one per space
+  in the overview): how busy it was over the last 30 minutes. For Claude and
+  Codex agents it comes from their own session transcripts (Herdr reports
+  each pane's session id), including Claude subagents, so it covers time
+  before the map opened. Other agents are sampled while the map runs. The
+  transcripts are only read, never sent anywhere.
+- **Zoom** (`z`) opens the selected Claude or Codex agent's session in
+  [zoetrope](https://github.com/furkankly/zoetrope) over the map: its
+  subagents, tool calls and a scrubbable timeline, following live. Quit
+  zoetrope (`q`) to return to the map. Needs `zoe` installed
+  (`brew install furkankly/tap/zoetrope` or `cargo install zoetrope`) and the
+  agent's Herdr integration (`herdr integration install claude`).
 - The **details box** shows the selected agent's kind, state and for how
   long, tab, reported status, task, and the last thing it said.
 - `?` lists every key, in the map itself:
@@ -353,7 +379,11 @@ close when agents are idle.
 
 | Setting | Where | Default |
 | --- | --- | --- |
-| Map width | a number in `$(herdr plugin config-dir horchestra)/width` | 32 |
+| Map width (docked left/right) | a number in `$(herdr plugin config-dir horchestra)/width` | 32 |
+| Map height (docked top/bottom) | a number in `…/height` | 14 |
+| Map side | shift+W/A/S/D in a map, or `left`/`right`/`top`/`bottom` in `…/map_side` | `left` |
+| Overview side | shift+W/A/S/D in the overview, or `…/overview_side` | `bottom` |
+| Edge animation | `off` in `$(herdr plugin config-dir horchestra)/animate` (or `HORCHESTRA_ANIMATE=0`) | on |
 | Map toggle key | the managed block in Herdr's config, or bind `horchestra.toggle` yourself | `prefix+m` |
 | Overview key | the managed block, or bind `horchestra.overview` yourself | `prefix+M` (`prefix+shift+m`) |
 | Team-start key | bind the `horchestra.team-up` action | none |
@@ -403,7 +433,11 @@ and `hire` start agents on your machine. Read `install.py` and
 - An agent restarted before it ever replied has no saved conversation and
   cannot be resumed (a fresh orchestrator is started; such members are
   reported).
-- Each map takes about 32 columns in its tab.
+- Each map takes about 32 columns (or 14 rows) in its tab. Herdr moves panes
+  only by keyboard or command, not by dragging, so maps are docked with
+  shift+W/A/S/D; dragging a border still resizes them. Docked top or bottom
+  in a tab split into columns, a map spans the pane it docks against, not
+  the whole tab.
 - `hire` and `fire` rewrite team.toml, dropping comments added by hand.
 - Files in `~/.claude/agents` are also offered as subagents in every Claude
   session; the orchestrator's description asks Claude not to use it that way.
@@ -442,6 +476,7 @@ from them:
 | Per-vendor agent icons and colours | [herdr-radar](https://github.com/hhdebb/herdr-radar), herdr-world |
 | Nesting agents under the agent that spawned them | [herdr-pi-tree](https://github.com/edxeth/herdr-pi-tree) |
 | A side panel that sits next to each agent tab | [agent-panel](https://github.com/flowy11/agent-panel) |
+| Edges that light up while an agent runs, an activity sparkline from session transcripts; `z` opens zoetrope itself | [zoetrope](https://github.com/furkankly/zoetrope) |
 
 ## License
 
