@@ -28,7 +28,29 @@ TOKEN_PROFILE = "agentmap_profile"  # member's role profile summary (written by 
 
 
 class HerdrError(Exception):
-    pass
+    """A failed herdr call; `code` is Herdr's error code when it sent one."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
+def _error_doc(text):
+    """Herdr's `{"error": {...}}` line in CLI output, or None."""
+    for line in reversed(text.strip().splitlines()):
+        try:
+            doc = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("error"), dict):
+            return doc["error"]
+    return None
+
+
+def _raise_error(err):
+    code = str(err.get("code") or "error")
+    message = str(err.get("message") or "").strip()
+    raise HerdrError(f"{code}: {message}" if message else code, code=code)
 
 
 def call(*args, timeout=5.0):
@@ -40,12 +62,19 @@ def call(*args, timeout=5.0):
             text=True,
             timeout=timeout,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        # Herdr did not answer in time: same meaning as its own timeout error.
+        raise HerdrError(f"timeout: herdr {' '.join(args[:2])} took over {timeout:g}s", code="timeout") from exc
+    except OSError as exc:
         raise HerdrError(str(exc)) from exc
     out = proc.stdout.strip()
     if not out and proc.returncode == 0:
         return {}  # some write commands print nothing on success
     if not out:
+        # Herdr reports failures as one JSON error line on stderr.
+        err = _error_doc(proc.stderr)
+        if err is not None:
+            _raise_error(err)
         raise HerdrError(proc.stderr.strip() or f"exit {proc.returncode}")
     try:
         doc = json.loads(out.splitlines()[-1])
@@ -54,8 +83,7 @@ def call(*args, timeout=5.0):
     if not isinstance(doc, dict):
         raise HerdrError("unexpected response")
     if "error" in doc:
-        err = doc.get("error") or {}
-        raise HerdrError(f"{err.get('code', 'error')}: {err.get('message', '')}")
+        _raise_error(doc.get("error") if isinstance(doc.get("error"), dict) else {})
     result = doc.get("result")
     return result if isinstance(result, dict) else {}
 

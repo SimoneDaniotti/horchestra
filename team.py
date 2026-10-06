@@ -525,9 +525,9 @@ def start_agent(name, kind, pane_id, args):
             return hc.call(*argv, timeout=START_TIMEOUT_MS / 1000 + 10)
         except hc.HerdrError as exc:
             last = exc
-            if "agent_not_ready" in str(exc):
+            if exc.code == "agent_not_ready":
                 return wait_until_ready(name, pane_id)
-            if "timeout" in str(exc):
+            if exc.code == "timeout":
                 break
             time.sleep(1.0 + attempt)
     raise TeamError(f"could not start {kind} as {name}: {last}")
@@ -1137,9 +1137,9 @@ def deliver(target, text, log=print, attempts=4):
             hc.call("agent", "prompt", target, text, "--wait", "--timeout", "20000", timeout=90)
             return True
         except hc.HerdrError as exc:
-            if "timeout" in str(exc):
+            if exc.code == "timeout":
                 return True  # the turn started and is still running
-            if "stalled" not in str(exc):
+            if exc.code != "agent_prompt_stalled":
                 log(f"could not message {target}: {exc}")
                 return False
             time.sleep(10)
