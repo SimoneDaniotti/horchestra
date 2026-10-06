@@ -9,10 +9,12 @@ Each member's agent session id is recorded in team.toml. Herdr persists
 those ids and resumes the same sessions after a server restart, so `restore`
 (run by the plugin's startup hook) can find every member again and repair
 names, map tags, and the orchestrator's instructions. Pane labels
-(`team:<role>`) are the fallback when a session did not resume.
+(`team:<role>`) are the fallback when a session did not resume; they are
+used to find and tag panes, never on their own to close or restart one.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -57,7 +59,21 @@ def _state_dir():
 STATE_DIR = _state_dir()
 REGISTRY = os.path.join(STATE_DIR, "teams.json")
 TERMINALS = os.path.join(STATE_DIR, "terminals.json")
-AGENT_FILE = os.path.expanduser("~/.claude/agents/orchestrator.md")
+
+
+def agent_file():
+    """The installed orchestrator session agent (honours $CLAUDE_CONFIG_DIR)."""
+    return os.path.join(roles.claude_config_dir(), "agents", "orchestrator.md")
+
+
+# Claude flags Horchestra sets itself; user args must not override them.
+RESERVED_CLAUDE_FLAGS = frozenset({
+    "--agent", "--settings", "--add-dir", "--resume", "-r", "--continue", "-c",
+    "--system-prompt-snapshot", "--name", "-n", "--append-system-prompt",
+    "--append-system-prompt-file", "--system-prompt", "--system-prompt-file",
+})
+STRING_FIELDS = ("role", "kind", "task", "session", "cwd", "profile", "reports_to", "brief")
+SKILL_FIELDS = ("uses_skills", "only_skills", "deny_skills")
 
 
 class TeamError(Exception):
@@ -81,16 +97,29 @@ def find_team_file(start):
 
 
 def project_root(start):
-    """Git root of `start` if there is one, else `start` itself."""
+    """Git root of `start` if there is one, else `start` itself.
+
+    A .git in the home folder or at / (a dotfiles repo) is not a project.
+    """
     path = os.path.abspath(start)
     walk = path
     while True:
-        if os.path.exists(os.path.join(walk, ".git")):
+        if os.path.exists(os.path.join(walk, ".git")) and not is_unsafe_root(walk):
             return walk
         parent = os.path.dirname(walk)
         if parent == walk:
             return path
         walk = parent
+
+
+def is_unsafe_root(folder):
+    """The home folder or the filesystem root: never a team's project folder.
+
+    A team.toml there is found from every project below it and registered
+    for the restart hook, so it is only created when asked for with --file.
+    """
+    folder = os.path.realpath(folder)
+    return folder == os.path.realpath(os.path.expanduser("~")) or os.path.dirname(folder) == folder
 
 
 def load(path):
@@ -99,7 +128,9 @@ def load(path):
     try:
         with open(path, "rb") as fh:
             data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError) as exc:
+        # TOMLDecodeError and UnicodeDecodeError (a file that is not UTF-8)
+        # are both ValueErrors: a bad team.toml is a TeamError, not a crash.
         raise TeamError(f"cannot read {path}: {exc}") from exc
     orch = data.get("orchestrator")
     data["orchestrator"] = orch if isinstance(orch, dict) else {}
@@ -115,7 +146,62 @@ def load(path):
             raise TeamError(f"duplicate member role {role!r} in {path}")
         seen.add(role.lower())
     data["member"] = members
+    validate(data, os.path.dirname(os.path.abspath(path)), path)
     return data
+
+
+def validate(team, root, path="team.toml"):
+    """Check field types so a bad team.toml fails here, with the field named.
+
+    `args` may be a single string, which is one argument (not split on spaces).
+    """
+    if "default_kind" in team and not isinstance(team["default_kind"], str):
+        raise TeamError(f"{path}: default_kind must be a string")
+    if "name_tabs" in team and not isinstance(team["name_tabs"], bool):
+        raise TeamError(f"{path}: name_tabs must be true or false")
+    if "deny_skills" in team:
+        _check_strings(team["deny_skills"], f"{path}: deny_skills")
+    entries = [("orchestrator", team["orchestrator"])]
+    entries += [(f"member[{i}] ({m['role']})", m) for i, m in enumerate(team["member"])]
+    for where, entry in entries:
+        validate_entry(team, entry, root, f"{path}: {where}")
+
+
+def validate_entry(team, entry, root, where):
+    for key in STRING_FIELDS:
+        if key in entry and not isinstance(entry[key], str):
+            raise TeamError(f"{where}.{key} must be a string")
+    if isinstance(entry.get("args"), str):
+        entry["args"] = [entry["args"]]  # one string is one argument
+    if "args" in entry:
+        _check_strings(entry["args"], f"{where}.args", allow_one=False)
+    for key in SKILL_FIELDS:
+        if key in entry:
+            _check_strings(entry[key], f"{where}.{key}")
+    cwd = entry.get("cwd")
+    if cwd:
+        inside = os.path.realpath(os.path.join(root, cwd))
+        base = os.path.realpath(root)
+        if os.path.isabs(cwd) or os.path.commonpath([inside, base]) != base:
+            raise TeamError(f"{where}.cwd must be a folder inside {root} (relative to team.toml)")
+    kind = entry.get("kind") or team.get("default_kind", "claude")
+    if kind == "claude":
+        clash = reserved_args(entry.get("args") or [])
+        if clash:
+            raise TeamError(f"{where}.args: {', '.join(clash)} is set by Horchestra itself; "
+                            "remove it (use a role profile for instructions and skill rules)")
+
+
+def _check_strings(value, where, allow_one=True):
+    if allow_one and isinstance(value, str):
+        return
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise TeamError(f"{where} must be a list of strings")
+
+
+def reserved_args(args):
+    """User args that would override a Claude flag Horchestra sets (flag or flag=value)."""
+    return [a for a in args if isinstance(a, str) and a.split("=", 1)[0] in RESERVED_CLAUDE_FLAGS]
 
 
 def _value(value):
@@ -182,9 +268,14 @@ class Space:
 
     def refresh(self):
         self.panes = hc.list_panes(self.workspace_id)
+        self.names = {}
         self.by_label = {
             p.get("label"): p for p in self.panes if isinstance(p.get("label"), str)
         }
+        self.labelled = {}
+        for p in self.panes:
+            if isinstance(p.get("label"), str):
+                self.labelled.setdefault(p["label"], []).append(p)
         self.by_session = {session_of(p): p for p in self.panes if session_of(p)}
 
     def entry(self, role):
@@ -198,15 +289,93 @@ class Space:
         pane = self.by_session.get(entry.get("session"))
         return pane or self.by_label.get(LABEL_PREFIX + role)
 
+    def verified_pane(self, role):
+        """A role's pane for operations that close or restart it.
+
+        Returns (pane, None), or (None, why). A label is free text any pane
+        can carry, so it is not proof on its own: the pane must run the
+        recorded session or, before a session is recorded, carry both the
+        label and the role token that sync wrote.
+        """
+        entry = self.entry(role) or {}
+        session = entry.get("session")
+        if isinstance(session, str) and session:
+            pane = self.by_session.get(session)
+            if pane:
+                return pane, None
+            return None, f"no pane runs {role}'s recorded session"
+        labelled = self.labelled.get(LABEL_PREFIX + role, [])
+        if len(labelled) > 1:
+            ids = ", ".join(p.get("pane_id", "?") for p in labelled)
+            return None, f"{len(labelled)} panes are labelled {LABEL_PREFIX}{role} ({ids}); ambiguous"
+        if labelled and tokens_of(labelled[0]).get(hc.TOKEN_ROLE) == role:
+            return labelled[0], None
+        return None, f"no pane is verifiably {role} (no recorded session)"
+
+    def label_only(self, role, pane):
+        """True when `pane` matched `role` only by label, against a recorded session.
+
+        Such a pane may be another team's agent sharing the label, so sync
+        must not record its session (which would make verified_pane trust it)
+        nor tag or rename it.
+        """
+        recorded = (self.entry(role) or {}).get("session")
+        if not (pane and isinstance(recorded, str) and recorded and session_of(pane) != recorded):
+            return False
+        return not self.same_terminal(role, pane)
+
+    def same_terminal(self, role, pane):
+        """Whether `pane` is the terminal last recorded for `role` by this team.
+
+        Terminals are recorded only for verified panes, and a terminal id is
+        per pane, so a new session there (e.g. after /clear) is still ours.
+        """
+        terminal = pane.get("terminal_id") if pane else None
+        return bool(terminal) and known_terminals(self.team_file).get(role) == terminal
+
     def agent_name(self, role):
+        """The Herdr agent name for a role, unique across the whole server.
+
+        Herdr agent names are global, so two projects with the same folder
+        name (two "api" checkouts) would collide on `<folder>-<role>`. The
+        name carries a short hash of the team root, except where this team's
+        own pane already holds the plain name (teams named before the hash).
+        """
+        names = self.__dict__.setdefault("names", {})
+        if role not in names:
+            plain = self.plain_agent_name(role)
+            names[role] = plain if self.holds_name(role, plain) else self.hashed_agent_name(role)
+        return names[role]
+
+    def holds_name(self, role, name):
+        """Whether the agent called `name` runs in this role's own pane."""
+        if getattr(self, "panes", None) is None:
+            return False
+        pane = self.pane(role)
+        if not pane or not pane.get("agent"):
+            return False
+        named = (hc.call_quiet("agent", "get", name) or {}).get("agent") or {}
+        return named.get("pane_id") == pane.get("pane_id")
+
+    def plain_agent_name(self, role):
         # Derived from the project dir, not the workspace id, so names stay
-        # the same after a Herdr restart renumbers workspaces.
+        # the same after a Herdr restart renumbers workspaces. Kept exactly
+        # as before so existing teams keep their names.
         project = re.sub(r"[^a-z0-9_-]", "-", os.path.basename(self.root).lower())
         role = re.sub(r"[^a-z0-9_-]", "-", role.lower())
         name = f"{project[: 31 - len(role) - 1]}-{role}"
         if not name[:1].isalpha():
             name = "t" + name
         return name[:32]
+
+    def hashed_agent_name(self, role):
+        """`<folder>-<hash>-<role>`, within Herdr's [a-z][a-z0-9_-]{0,31}."""
+        digest = hashlib.sha1(os.path.abspath(self.root).encode()).hexdigest()[:4]
+        suffix = f"-{digest}-" + re.sub(r"[^a-z0-9_-]", "-", role.lower())
+        project = re.sub(r"[^a-z0-9_-]", "-", os.path.basename(self.root).lower())
+        if not project[:1].isalpha():
+            project = "t" + project
+        return project[: 32 - len(suffix)] + suffix
 
 
 def session_of(pane):
@@ -219,9 +388,24 @@ def register(team_file):
     """Remember team files so the startup hook can restore them."""
     teams = registered()
     if team_file not in teams:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(REGISTRY, "w") as fh:
-            json.dump(sorted(set(teams) | {team_file}), fh, indent=2)
+        write_registry(set(teams) | {team_file})
+
+
+def unregister(team_files):
+    """Drop team files from the restart list; returns those that were on it."""
+    teams = registered()
+    dropped = [t for t in teams if t in set(team_files)]
+    if dropped:
+        write_registry(t for t in teams if t not in dropped)
+    return dropped
+
+
+def write_registry(teams):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = REGISTRY + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(sorted(set(teams)), fh, indent=2)
+    os.replace(tmp, REGISTRY)
 
 
 def _read_json(path, default):
@@ -275,7 +459,14 @@ def caller_pane():
     return None
 
 
-def resolve_space(team_file=None, create=False):
+def resolve_space(team_file=None, create=False, read_only=False):
+    """The caller's space and its team.
+
+    Only `create` callers (up, init, adopt) may write a new team.toml, and
+    never straight into the home folder or / unless the path is given with
+    --file. `read_only` callers (scan, roles) work without a team.toml: they
+    get an empty team that is neither saved nor registered.
+    """
     pane_id = caller_pane()
     pane = hc.get_pane(pane_id) if pane_id else {}
     workspace = (
@@ -286,19 +477,36 @@ def resolve_space(team_file=None, create=False):
     if not workspace:
         raise TeamError("run this inside a Herdr pane (no workspace context)")
     cwd = pane.get("foreground_cwd") or pane.get("cwd") or os.getcwd()
-    path = team_file or os.environ.get("HORCHESTRA_TEAM_FILE") or os.environ.get("AGENTMAP_TEAM_FILE")
+    explicit = team_file or os.environ.get("HORCHESTRA_TEAM_FILE") or os.environ.get("AGENTMAP_TEAM_FILE")
+    path = explicit
     # Plugin actions run from the plugin root, so only trust the shell cwd
     # when invoked from a terminal (e.g. by the orchestrator).
     if not path and not os.environ.get("HERDR_PLUGIN_ID"):
         path = find_team_file(os.getcwd())
     path = path or find_team_file(cwd)
-    if not path:
+    if path and not os.path.isfile(path):
         if not create:
-            raise TeamError(f"no {TEAM_FILE} found from {cwd}; run `horchestra-team up` first")
+            raise TeamError(f"{path} does not exist; run `horchestra-team up --file {path}` to create it")
+        if not os.path.isdir(os.path.dirname(os.path.abspath(path))):
+            raise TeamError(f"cannot create {path}: its folder does not exist")
+        save(path, new_team())
+    elif not path:
         path = os.path.join(project_root(cwd), TEAM_FILE)
+        if read_only:
+            return Space(workspace, os.path.abspath(path), new_team()), pane
+        if not create:
+            raise TeamError(f"no {TEAM_FILE} found from {cwd}; run `horchestra-team up` "
+                            "in the project folder first")
+        if is_unsafe_root(os.path.dirname(path)):
+            raise TeamError(f"not creating {path}: {os.path.dirname(path)} is your home folder or /, "
+                            "not a project. cd into the project folder first, or pass "
+                            f"`--file {path}` if you really want a team there")
         save(path, new_team())
     path = os.path.abspath(path)
-    register(path)
+    if create:
+        # Only up/init/adopt (and reopen) put a team on the restart list, so
+        # `forget` sticks when members later run status/message/sync.
+        register(path)
     return Space(workspace, path, load(path)), pane
 
 
@@ -364,8 +572,10 @@ def new_member_pane(space, cwd, role):
 def name_tabs(space, log=print):
     """Keep each agent's tab named after its role.
 
-    Only renames a tab when that agent is the only agent in it (plain shells
-    and map panes do not count), since one tab cannot carry two names.
+    Only renames a tab when the role's own pane runs an agent and that is
+    the only agent in it (plain shells and map panes do not count), since
+    one tab cannot carry two names and a dead role pane must not name a tab
+    after another agent.
     """
     if space.team.get("name_tabs") is False:
         return
@@ -377,7 +587,9 @@ def name_tabs(space, log=print):
             agents_per_tab[p.get("tab_id")] = agents_per_tab.get(p.get("tab_id"), 0) + 1
     for role in [ORCHESTRATOR] + [m["role"] for m in space.team["member"]]:
         pane = space.pane(role)
-        tab = pane.get("tab_id") if pane else None
+        if not pane or not pane.get("agent") or tokens_of(pane).get(hc.TOKEN_VIEW):
+            continue
+        tab = pane.get("tab_id")
         if tab in tabs and agents_per_tab.get(tab) == 1 and tabs[tab] != role:
             if hc.call_quiet("tab", "rename", tab, role) is not None:
                 tabs[tab] = role
@@ -435,7 +647,7 @@ def orchestrator_args(space, team):
     kind = orch.get("kind", "claude")
     args = [str(a) for a in orch.get("args", [])]
     protocol = orchestrator_protocol(space, team)
-    if kind == "claude" and os.path.isfile(AGENT_FILE):
+    if kind == "claude" and os.path.isfile(agent_file()):
         # The installed session agent carries the protocol, and
         # `claude --resume` keeps it.
         args = ["--name", ORCHESTRATOR, "--agent", "orchestrator", *args]
@@ -464,7 +676,27 @@ def start_orchestrator(space, team, near_pane):
     start_agent(space.agent_name(ORCHESTRATOR), kind, target, args)
     if kind != "claude":
         prompt(target, protocol)
-    return wait_for_session(space, target)
+    pane = wait_for_session(space, target)
+    record_started(space, ORCHESTRATOR, pane)
+    return pane
+
+
+def record_started(space, role, pane):
+    """Record the session of an agent we just started in `pane`.
+
+    Starting a fresh agent means the recorded session no longer runs here,
+    and only a session we started (or one the human adopted) is proof of
+    identity, so this is the one place a recorded session is replaced.
+    """
+    entry = space.entry(role)
+    if entry is None:
+        return
+    session = session_of(pane) if pane else None
+    if session:
+        entry["session"] = session
+    else:
+        entry.pop("session", None)  # stale; the label + role token covers the gap
+    save(space.team_file, space.team)
 
 
 def spawn_member(space, team, member):
@@ -488,7 +720,9 @@ def spawn_member(space, team, member):
         brief = roles.agent_body(profile, team_context(space, role)) + "\n" + member_brief(member)
     start_agent(space.agent_name(role), kind, pane_id, args)
     prompt(pane_id, brief)
-    return wait_for_session(space, pane_id)
+    pane = wait_for_session(space, pane_id)
+    record_started(space, role, pane)
+    return pane
 
 
 def member_args(space, member, profile):
@@ -500,10 +734,13 @@ def member_args(space, member, profile):
     # Profile -> session agent (+ role skills dir, deny settings). --add-dir is
     # variadic, so the user's args (flags) follow it.
     context = team_context(space, member["role"])
+    try:
+        launch = roles.claude_args(space.root, STATE_DIR, space.agent_name(member["role"]), profile, context)
+    except roles.RoleError as exc:
+        # e.g. the user's own .claude/agents/horchestra-<role>.md is in the way.
+        raise TeamError(str(exc)) from exc
     # --name keeps the Claude conversation named after the role (and its tab).
-    return (["--name", member["role"]]
-            + roles.claude_args(space.root, STATE_DIR, space.agent_name(member["role"]), profile, context)
-            + args)
+    return ["--name", member["role"]] + launch + args
 
 
 # ---- respawn ------------------------------------------------------------
@@ -533,8 +770,10 @@ def respawn(space, role, force=False, log=print):
     entry = space.entry(role)
     if entry is None:
         raise TeamError(f"{role} is not on the team")
-    pane = space.pane(role)
-    if not pane or not pane.get("agent"):
+    pane, problem = space.verified_pane(role)
+    if pane is None:
+        raise TeamError(f"not respawning {role}: {problem}")
+    if not pane.get("agent"):
         raise TeamError(f"{role} has no running agent to respawn; use `sync` to start it")
     kind = entry.get("kind") or space.team.get("default_kind", "claude")
     if kind != "claude" or pane.get("agent") != "claude":
@@ -550,9 +789,12 @@ def respawn(space, role, force=False, log=print):
         profile = load_profile(space, entry)
         launch = member_args(space, entry, profile)
     args = ["--resume", session, "--system-prompt-snapshot", "off", *launch]
+    # Decide the name while the agent still runs: once it has quit, nothing
+    # holds the plain name any more and a pre-hash team would be renamed.
+    name = space.agent_name(role)
     log(f"respawning {role} in {pane['pane_id']}…")
     quit_agent(pane["pane_id"])
-    start_agent(space.agent_name(role), "claude", pane["pane_id"], args)
+    start_agent(name, "claude", pane["pane_id"], args)
     if not is_orch:
         entry.pop("adopted", None)
         entry["profile_applied"] = True
@@ -601,7 +843,10 @@ def adopt(space, role, pane, remind=False, log=print):
     """
     entry = space.entry(role)
     session = session_of(pane)
-    if entry is not None and session and entry.get("session") != session:
+    if entry is not None and session and entry.get("session") != session and (
+            not entry.get("session") or space.same_terminal(role, pane)):
+        # Fill a missing session, or follow a new one in the role's own
+        # terminal. A label match alone never replaces a recorded session.
         entry["session"] = session
         space.dirty = True
     if pane.get("label") != LABEL_PREFIX + role:
@@ -626,6 +871,11 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
         # Reuse a known orchestrator pane whose agent has exited.
         orch = start_orchestrator(space, team, orch or near_pane)
     refs = {}
+    if orch and space.label_only(ORCHESTRATOR, orch):
+        log(f"note: pane {orch['pane_id']} is labelled {LABEL_PREFIX}{ORCHESTRATOR} but does not run "
+            "the recorded orchestrator session; leaving it alone (run `horchestra-team init` "
+            "from it if it is this team's orchestrator)")
+        orch = None
     if orch:
         if adopt(space, ORCHESTRATOR, orch, log=log) and rebrief:
             # Resumed after a restart: --append-system-prompt-file is not
@@ -644,6 +894,11 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
             pane = spawn_member(space, team, member)
         if not pane:
             continue
+        if space.label_only(role, pane):
+            log(f"note: pane {pane['pane_id']} is labelled {LABEL_PREFIX}{role} but does not run "
+                f"{role}'s recorded session; leaving it alone (if it is {role}, "
+                f"`fire {role}` then `adopt {pane['pane_id']} --role {role}`)")
+            continue
         adopt(space, role, pane, log=log)
         refs[role] = pane.get("terminal_id") or pane["pane_id"]
         parent = refs.get(member.get("reports_to")) or refs.get(ORCHESTRATOR)
@@ -661,13 +916,14 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
         role: pane.get("terminal_id")
         for role in [ORCHESTRATOR] + [m["role"] for m in team["member"]]
         for pane in [space.pane(role)]
-        if pane and pane.get("agent") and pane.get("terminal_id")
+        if pane and pane.get("agent") and pane.get("terminal_id") and not space.label_only(role, pane)
     })
 
     known = {p["pane_id"] for p in (space.pane(r) for r in [ORCHESTRATOR] + [m["role"] for m in team["member"]]) if p}
     for label, pane in space.by_label.items():
         if label.startswith(LABEL_PREFIX) and pane["pane_id"] not in known:
-            log(f"note: pane {label} is not in team.toml (fire it or add it back)")
+            log(f"note: pane {pane['pane_id']} ({label}) is not in team.toml "
+                "(close it by hand or add the role back)")
 
 
 def profile_line(space, member):
@@ -704,7 +960,7 @@ FRESH_NOTE = (
 
 RESUMED_GRACE_SECONDS = 45  # once some agents resumed, wait this long for the rest
 UNRESUMED_GRACE_SECONDS = 180  # when nothing resumed yet (client may attach late)
-MAP_LABELS = ("horchestra-map", "Agent map")  # current and pre-0.1 pane titles
+RESTORE_MAX_FAILURES = 3  # give up on one team after this many failed ticks
 
 
 def is_live(pane):
@@ -717,16 +973,29 @@ def restore(log=print):
     Members are never started here: one whose session did not resume is left
     as a labelled shell and reported to the orchestrator, which can re-hire
     it. An orchestrator that could not resume is started fresh in its pane.
+    Each team is repaired on its own, so one broken team.toml or a pane that
+    vanishes mid-way never stops the others.
     """
     pending, state = {}, {}
+    gone = [path for path in registered() if not os.path.isfile(path)]
+    if gone:
+        # Deleted or moved projects: stop looking for them on every start.
+        try:
+            unregister(gone)
+            log(f"forgot team files that no longer exist: {', '.join(gone)}")
+        except OSError as exc:
+            log(f"could not update the team registry: {exc}")
     for path in registered():
         if os.path.isfile(path):
             try:
                 pending[path] = load(path)
-                state[path] = {"first_seen": None, "orch_resumed": None,
+                state[path] = {"first_seen": None, "orch_resumed": None, "failures": 0,
                                "terminals": known_terminals(path)}
-            except TeamError as exc:
+            except Exception as exc:  # noqa: BLE001 - one bad file must not stop the hook
+                pending.pop(path, None)
                 log(f"skip {path}: {exc}")
+    rivals = shared_sessions(pending)
+    claims = {}  # session id or pane id -> the team file that owns it this run
     started = time.monotonic()
     while pending and time.monotonic() < started + RESTORE_SECONDS:
         try:
@@ -738,36 +1007,122 @@ def restore(log=print):
         now = time.monotonic()
         for path, team in list(pending.items()):
             st = state[path]
-            entries = [team["orchestrator"]] + team["member"]
-            sessions = [e["session"] for e in entries if e.get("session")]
-            found = [by_session[s] for s in sessions if s in by_session]
-            if not found and st["first_seen"] is None:
-                # Nothing of this team is here: likely an old team.
-                if now - started > IDLE_TEAM_SECONDS:
-                    del pending[path]
-                continue
-            if found:
-                workspaces = [p.get("workspace_id") for p in found]
-                st["workspace"] = max(set(workspaces), key=workspaces.count)
-            st["first_seen"] = st["first_seen"] or now
-            space = Space(st["workspace"], path, team)
-            roles = [ORCHESTRATOR] + [m["role"] for m in team["member"]]
-            live = {r for r in roles if is_live(space.pane(r))}
-
-            orch = space.pane(ORCHESTRATOR)
-            # Decide from terminals recorded before startup: a live handoff
-            # keeps the orchestrator's terminal, a restart replaces it.
-            if orch and orch.get("agent") and st["orch_resumed"] is None:
-                before = st["terminals"].get(ORCHESTRATOR)
-                st["orch_resumed"] = bool(before) and before != orch.get("terminal_id")
-            if live:
-                sync(space, spawn=False, log=lambda _msg: None)
-
-            grace = RESUMED_GRACE_SECONDS if live else UNRESUMED_GRACE_SECONDS
-            if len(live) == len(roles) or now - st["first_seen"] > grace:
-                finish_restore(space, live, st, log=lambda msg, p=path: log(f"{p}: {msg}"))
+            try:
+                done = restore_team(path, team, st, by_session, claims, started, now, log, rivals)
+            except Exception as exc:  # noqa: BLE001 - isolate teams in the startup hook
+                st["failures"] += 1
+                if st.get("finishing") or st["failures"] >= RESTORE_MAX_FAILURES:
+                    # finish_restore restarts agents: never run it twice.
+                    log(f"{path}: giving up: {type(exc).__name__}: {exc}")
+                    done = True
+                else:
+                    log(f"{path}: will retry: {type(exc).__name__}: {exc}")
+                    done = False
+            if done:
                 del pending[path]
         time.sleep(3)
+
+
+def shared_sessions(teams):
+    """Session ids recorded by more than one team file -> those files.
+
+    A copied project carries its original's session ids in a second
+    team.toml; both must not act on the same agents.
+    """
+    owners = {}
+    for path, team in teams.items():
+        for entry in [team["orchestrator"]] + team["member"]:
+            session = entry.get("session")
+            if isinstance(session, str) and session:
+                owners.setdefault(session, set()).add(path)
+    return {s: sorted(paths) for s, paths in owners.items() if len(paths) > 1}
+
+
+def pane_owner(pane, paths):
+    """The team file whose folder holds `pane`'s working directory, else None.
+
+    The innermost team root wins (a copy nested inside the original), and
+    None means it cannot be decided (no cwd, outside every root, or a tie).
+    """
+    cwd = pane.get("foreground_cwd") or pane.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return None
+    cwd = os.path.realpath(cwd)
+    inside = []
+    for path in paths:
+        root = os.path.realpath(os.path.dirname(os.path.abspath(path)))
+        if os.path.commonpath([cwd, root]) == root:
+            inside.append((len(root), path))
+    inside.sort(reverse=True)
+    if not inside or (len(inside) > 1 and inside[0][0] == inside[1][0]):
+        return None
+    return inside[0][1]
+
+
+def claim(claims, path, keys):
+    """Claim session/pane ids for one team file; return those owned by another.
+
+    A copied project carries the same session ids in two team.toml files;
+    only the first file to see them may act on those agents.
+    """
+    taken = sorted({k for k in keys if claims.get(k, path) != path})
+    if not taken:
+        for key in keys:
+            claims[key] = path
+    return taken
+
+
+def restore_team(path, team, st, by_session, claims, started, now, log=print, rivals=None):
+    """One restore tick for one team; True when it is finished (or skipped)."""
+    entries = [team["orchestrator"]] + team["member"]
+    sessions = [e["session"] for e in entries if isinstance(e.get("session"), str) and e.get("session")]
+    found = [by_session[s] for s in sessions if s in by_session]
+    for s in sessions:
+        shared = (rivals or {}).get(s)
+        if not shared or s not in by_session:
+            continue
+        # Decide by where the agent runs, not by which file came first.
+        owner = pane_owner(by_session[s], shared)
+        if owner != path:
+            why = (f"its agents run in {os.path.dirname(owner)}" if owner else
+                   f"it shares sessions with {', '.join(p for p in shared if p != path)} "
+                   "and their folder cannot tell which team owns them")
+            log(f"{path}: skipped: {why} (a copied project? give one copy a fresh team.toml)")
+            return True
+    if not found and st["first_seen"] is None:
+        # Nothing of this team is here: likely an old team.
+        return now - started > IDLE_TEAM_SECONDS
+    if found:
+        workspaces = [p.get("workspace_id") for p in found]
+        st["workspace"] = max(set(workspaces), key=workspaces.count)
+    st["first_seen"] = st["first_seen"] or now
+    space = Space(st["workspace"], path, team)
+    roles = [ORCHESTRATOR] + [m["role"] for m in team["member"]]
+    keys = [s for s in sessions if s in by_session]
+    keys += ["pane:" + p["pane_id"] for p in (space.pane(r) for r in roles) if p and p.get("pane_id")]
+    taken = claim(claims, path, keys)
+    if taken:
+        owners = sorted({claims[k] for k in taken})
+        log(f"{path}: skipped: its agents already belong to {', '.join(owners)} "
+            "(a copied project? give one copy a fresh team.toml)")
+        return True
+    live = {r for r in roles if is_live(space.pane(r))}
+
+    orch = space.pane(ORCHESTRATOR)
+    # Decide from terminals recorded before startup: a live handoff
+    # keeps the orchestrator's terminal, a restart replaces it.
+    if orch and orch.get("agent") and st["orch_resumed"] is None:
+        before = st["terminals"].get(ORCHESTRATOR)
+        st["orch_resumed"] = bool(before) and before != orch.get("terminal_id")
+    if live:
+        sync(space, spawn=False, log=lambda _msg: None)
+
+    grace = RESUMED_GRACE_SECONDS if live else UNRESUMED_GRACE_SECONDS
+    if len(live) == len(roles) or now - st["first_seen"] > grace:
+        st["finishing"] = True
+        finish_restore(space, live, st, log=lambda msg, p=path: log(f"{p}: {msg}"))
+        return True
+    return False
 
 
 def deliver(target, text, log=print, attempts=4):
@@ -822,7 +1177,10 @@ def finish_restore(space, live, st, log=print):
         try:
             orch = start_orchestrator(space, team, space.pane(ORCHESTRATOR))
             sync(space, spawn=False, log=lambda _msg: None)
-            deliver(orch["pane_id"], FRESH_NOTE.format(missing=note), log=log)
+            if orch:
+                deliver(orch["pane_id"], FRESH_NOTE.format(missing=note), log=log)
+            else:
+                log("the new orchestrator's pane disappeared; not briefing it")
         except (TeamError, hc.HerdrError) as exc:
             log(f"could not start orchestrator: {exc}")
     elif st.get("orch_resumed"):
@@ -833,12 +1191,16 @@ def finish_restore(space, live, st, log=print):
                 respawn(space, ORCHESTRATOR, log=log)
             except (TeamError, hc.HerdrError) as exc:
                 log(f"could not refresh the orchestrator's instructions: {exc}")
-        orch = space.pane(ORCHESTRATOR)
+        # Only brief a pane proven to be this team's orchestrator.
+        orch, problem = space.verified_pane(ORCHESTRATOR)
         text = RESUME_NOTE.format(missing=note)
-        if not os.path.isfile(AGENT_FILE):
+        if not os.path.isfile(agent_file()):
             # Started with --append-system-prompt-file, which resume drops.
             text += "\n\nYour orchestrator instructions:\n\n" + orchestrator_protocol(space, team)
-        deliver(orch["pane_id"], text, log=log)
+        if orch:
+            deliver(orch["pane_id"], text, log=log)
+        else:
+            log(f"not re-briefing the orchestrator: {problem}")
     replace_dead_maps(space, log=log)
     log("restored" + (f" (not resumed: {', '.join(missing)})" if missing else ""))
 
@@ -867,16 +1229,18 @@ def show_maps(space, force=False, log=print):
 
 
 def replace_dead_maps(space, log=print):
-    """Map panes come back from a restart as idle shells; reopen them."""
+    """Map panes come back from a restart as idle shells; reopen them.
+
+    toggle.dead_views only returns titled panes that are verifiably idle
+    shells, so a pane the human reused (or merely titled alike) stays open.
+    """
+    import toggle
+
     space.refresh()
-    for p in space.panes:
-        # A restored overview is just an idle shell; prefix+M reopens it.
-        if p.get("label") == "horchestra-overview" and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW):
-            hc.call_quiet("pane", "close", p["pane_id"])
-    dead = [
-        p["pane_id"] for p in space.panes
-        if p.get("label") in MAP_LABELS and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW)
-    ]
+    # A restored overview is just an idle shell; prefix+M reopens it.
+    for pane_id in toggle.dead_views(space.panes, toggle.OVERVIEW_LABEL):
+        hc.call_quiet("pane", "close", pane_id)
+    dead = toggle.dead_views(space.panes, toggle.MAP_LABEL)
     if not dead:
         return
     for pane_id in dead:
@@ -975,7 +1339,7 @@ def cmd_init(args):
 
 def cmd_scan(args):
     """List agents in this space that are not on the team."""
-    space, _ = resolve_space(args.file, create=True)
+    space, _ = resolve_space(args.file, read_only=True)
     team = space.team
     managed = {p["pane_id"] for p in (space.pane(r) for r in [ORCHESTRATOR] + [m["role"] for m in team["member"]]) if p}
     tabs = {t.get("tab_id"): t.get("label") for t in
@@ -1043,7 +1407,7 @@ def tokens_of(pane):
 
 def cmd_roles(args):
     """List role profiles in this project and who uses them."""
-    space, _ = resolve_space(args.file, create=True)
+    space, _ = resolve_space(args.file, read_only=True)
     names = roles.list_profiles(space.root)
     print(f"profiles in {roles.roles_root(space.root)}:")
     if not names:
@@ -1092,7 +1456,8 @@ def session_on_disk(kind, session):
     import glob
 
     if kind == "claude":
-        return bool(glob.glob(os.path.expanduser(f"~/.claude/projects/*/{session}.jsonl")))
+        pattern = os.path.join(glob.escape(roles.claude_config_dir()), "projects", "*", f"{glob.escape(session)}.jsonl")
+        return bool(glob.glob(pattern))
     if kind == "codex":
         pattern = os.path.expanduser(f"~/.codex/sessions/**/*{session}*.jsonl")
         return bool(glob.glob(pattern, recursive=True))
@@ -1110,6 +1475,28 @@ def resume_launch(space, role, kind, session):
     return ["resume", *[str(a) for a in entry.get("args", [])], session]
 
 
+def team_panes_anywhere(root, entries, panes):
+    """Panes in any space that still belong to this team.
+
+    A pane counts when it runs one of the team's sessions (even idle), or
+    carries a team:<role> label for one of its roles while sitting in the
+    project folder (labels alone are shared by every project's teams).
+    """
+    sessions = {e.get("session") for _, e in entries if e.get("session")}
+    labels = {LABEL_PREFIX + role for role, _ in entries}
+    base = os.path.realpath(root)
+
+    def in_project(p):
+        cwd = p.get("foreground_cwd") or p.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            return False
+        cwd = os.path.realpath(cwd)
+        return os.path.commonpath([cwd, base]) == base
+
+    return [p for p in panes if isinstance(p, dict) and (
+        session_of(p) in sessions or (p.get("label") in labels and in_project(p)))]
+
+
 def cmd_reopen(args):
     """Recreate a closed space from team.toml, resuming every agent's conversation."""
     path = args.file or os.environ.get("HORCHESTRA_TEAM_FILE") or find_team_file(os.getcwd())
@@ -1120,13 +1507,14 @@ def cmd_reopen(args):
     register(path)
     root = os.path.dirname(path)
     entries = [(ORCHESTRATOR, team["orchestrator"])] + [(m["role"], m) for m in team["member"]]
-    sessions = {e.get("session") for _, e in entries if e.get("session")}
     everywhere = hc.call("pane", "list").get("panes") or []
-    open_now = [p for p in everywhere if isinstance(p, dict) and p.get("agent") and session_of(p) in sessions]
+    open_now = team_panes_anywhere(root, entries, everywhere)
     if open_now:
         where = sorted({p.get("workspace_id", "?") for p in open_now})
-        raise TeamError(f"this team is still running in space(s) {', '.join(where)}; "
-                        "close it first, or use `respawn` to refresh agents in place")
+        ids = ", ".join(p.get("pane_id", "?") for p in open_now)
+        raise TeamError(f"this team still has panes in space(s) {', '.join(where)} ({ids}); "
+                        "run `horchestra-team sync` there to restart missing members, "
+                        "or close those panes first")
 
     label = args.label or os.path.basename(root)
     created = hc.call("workspace", "create", "--label", label, "--cwd", root, "--focus")
@@ -1180,6 +1568,18 @@ def cmd_reopen(args):
     print(f"done: resumed {len(resumed)}, fresh {len(fresh)}, failed {len(failed)}")
 
 
+def cmd_forget(args):
+    """Stop restoring this team after Herdr restarts (team.toml is kept)."""
+    path = args.file or os.environ.get("HORCHESTRA_TEAM_FILE") or find_team_file(os.getcwd())
+    if not path:
+        raise TeamError(f"no {TEAM_FILE} found from {os.getcwd()}; cd into the project or pass --file")
+    path = os.path.abspath(path)
+    if unregister([path]):
+        print(f"forgot {path}; it is no longer restored after a restart (`up` registers it again)")
+    else:
+        print(f"{path} was not on the restart list")
+
+
 def cmd_sync(args):
     space, pane = resolve_space(args.file)
     sync(space, near_pane=pane)
@@ -1209,34 +1609,71 @@ def cmd_hire(args):
         member["deny_skills"] = args.deny_skill
     if args.only_skill:
         member["only_skills"] = args.only_skill
+    validate_entry(team, member, space.root, f"hire {args.role}")
     load_profile(space, member)  # fail before touching team.toml
+    if member["kind"] == "claude":
+        try:
+            roles.check_agent_file(space.root, args.role)
+        except roles.RoleError as exc:
+            raise TeamError(str(exc)) from exc
     before = dump(team)
+    existing = (space.pane(args.role) or {}).get("pane_id")
     team["member"].append(member)
     save(space.team_file, team)
     try:
         sync(space, only={args.role})
-    except (TeamError, hc.HerdrError):
-        with open(space.team_file, "w") as fh:
-            fh.write(before)
-        raise
+    except (TeamError, hc.HerdrError) as exc:
+        kept = hire_left_behind(space, args.role, existing)
+        if kept is None:
+            # Nothing was created: undo the team.toml change.
+            tmp = space.team_file + ".tmp"
+            with open(tmp, "w") as fh:
+                fh.write(before)
+            os.replace(tmp, space.team_file)
+            raise
+        raise TeamError(
+            f"{args.role} stays on the team (pane {kept}) but did not finish starting: {exc}. "
+            f"Answer the agent's prompt in pane {kept} if it shows one, then run "
+            "`horchestra-team sync`") from exc
     show_maps(space)
     pane = space.pane(args.role)
     print(f"hired {args.role}: agent {space.agent_name(args.role)} in pane {pane['pane_id'] if pane else '?'}")
 
 
+def hire_left_behind(space, role, existing):
+    """The pane a failed hire created or started an agent in, else None.
+
+    Rolling team.toml back then would orphan a running agent (e.g. one
+    waiting on a folder-trust prompt), so the member is kept instead.
+    """
+    try:
+        space.refresh()
+    except hc.HerdrError:
+        return None
+    pane = space.pane(role)
+    if pane and (pane.get("pane_id") != existing or pane.get("agent")):
+        return pane["pane_id"]
+    return None
+
+
 def cmd_fire(args):
+    if args.role.lower() == ORCHESTRATOR:
+        raise TeamError("the orchestrator cannot be fired; only members can")
     space, _ = resolve_space(args.file)
     team = space.team
-    kept = [m for m in team["member"] if m["role"].lower() != args.role.lower()]
-    role = next((m["role"] for m in team["member"] if m["role"].lower() == args.role.lower()), args.role)
-    pane = space.pane(role)
-    if len(kept) == len(team["member"]) and pane is None:
-        raise TeamError(f"{args.role} is not on the team")
-    team["member"] = kept
+    role = next((m["role"] for m in team["member"] if m["role"].lower() == args.role.lower()), None)
+    if role is None:
+        raise TeamError(f"{args.role} is not on the team (see `horchestra-team status`)")
+    # Resolve before saving: the verification needs the member's session.
+    pane, problem = space.verified_pane(role)
+    team["member"] = [m for m in team["member"] if m["role"] != role]
     save(space.team_file, team)
     if pane:
         hc.call_quiet("pane", "close", pane["pane_id"])
-    print(f"fired {args.role}")
+    elif space.pane(role):
+        print(f"note: left pane {space.pane(role)['pane_id']} open ({problem}); "
+              f"close it by hand if it is {role}'s")
+    print(f"fired {role}")
 
 
 def cmd_status(args):
@@ -1283,6 +1720,7 @@ def main(argv=None):
     resp.add_argument("--force", action="store_true", help="even if it is working")
     resp.set_defaults(func=cmd_respawn)
     sub.add_parser("status", help="show the team").set_defaults(func=cmd_status)
+    sub.add_parser("forget", help="stop restoring this team after Herdr restarts").set_defaults(func=cmd_forget)
     message = sub.add_parser("message", help="send a message to a team agent by role, e.g. orchestrator")
     message.add_argument("role")
     message.add_argument("text", nargs="+")
@@ -1324,7 +1762,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         args.func(args)
-    except (TeamError, hc.HerdrError) as exc:
+    except (TeamError, roles.RoleError, hc.HerdrError) as exc:
         print(f"horchestra-team: {exc}", file=sys.stderr)
         return 1
     return 0

@@ -61,20 +61,63 @@ def rects(layout):
     }
 
 
-MAP_LABELS = ("horchestra-map", "Agent map")  # current and pre-0.1 pane titles
+MAP_LABEL = "horchestra-map"
 OVERVIEW_LABEL = "horchestra-overview"
 OVERVIEW_SHARE = 0.45  # of the tab's height
+# Login shells show as "-zsh"; Windows names carry ".exe".
+PLAIN_SHELLS = {"sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh",
+                "nu", "xonsh", "elvish", "pwsh", "powershell", "cmd"}
 
 
 def is_map(pane):
-    """A per-tab map. Live maps carry a token; restored ones keep the label."""
-    view = (pane.get("tokens") or {}).get(hc.TOKEN_VIEW)
-    return view == "1" or (not view and pane.get("label") in MAP_LABELS)
+    """A live per-tab map: only the map itself writes this token.
+
+    A label alone is never proof (any pane can carry it, including the
+    pre-0.1 "Agent map" title), so label-only panes are not treated as maps.
+    """
+    return (pane.get("tokens") or {}).get(hc.TOKEN_VIEW) == "1"
 
 
 def is_overview(pane):
-    view = (pane.get("tokens") or {}).get(hc.TOKEN_VIEW)
-    return view == "all" or (not view and pane.get("label") == OVERVIEW_LABEL)
+    return (pane.get("tokens") or {}).get(hc.TOKEN_VIEW) == "all"
+
+
+def is_plain_shell(pane_id):
+    """Whether only an idle shell runs in the pane (False when unknown)."""
+    info = (hc.call_quiet("pane", "process-info", "--pane", pane_id) or {}).get("process_info")
+    procs = info.get("foreground_processes") if isinstance(info, dict) else None
+    if not isinstance(procs, list) or not procs:
+        return False
+    for proc in procs:
+        name = proc.get("name") if isinstance(proc, dict) else None
+        if not isinstance(name, str):
+            return False
+        name = os.path.basename(name.lstrip("-")).lower()
+        if name.endswith(".exe"):
+            name = name[:-4]
+        if name not in PLAIN_SHELLS:
+            return False
+    return True
+
+
+def dead_views(panes, label):
+    """Map/overview panes restored by a Herdr restart as idle shells.
+
+    A restart drops the view token, so these are recognised by their title,
+    but only closed when nothing else could be living there: no agent and
+    nothing but a plain shell in the foreground.
+    """
+    return [
+        p["pane_id"] for p in panes
+        if p.get("pane_id") and p.get("label") == label
+        and not (p.get("tokens") or {}).get(hc.TOKEN_VIEW)
+        and not p.get("agent") and is_plain_shell(p["pane_id"])
+    ]
+
+
+def close_view(pane_id):
+    if hc.call_quiet("plugin", "pane", "close", pane_id) is None:
+        hc.call_quiet("pane", "close", pane_id)
 
 
 def map_panes(panes):
@@ -153,10 +196,10 @@ def toggle_overview(focused):
     """Close any all-spaces overview, or open one along the bottom of this tab."""
     panes = [p for p in hc.call("pane", "list").get("panes") or [] if isinstance(p, dict)]
     existing = [p["pane_id"] for p in panes if p.get("pane_id") and is_overview(p)]
+    existing += dead_views(panes, OVERVIEW_LABEL)
     if existing:
         for pane_id in existing:
-            if hc.call_quiet("plugin", "pane", "close", pane_id) is None:
-                hc.call_quiet("pane", "close", pane_id)
+            close_view(pane_id)
         return 0
     if not focused:
         focused = next((p["pane_id"] for p in panes if p.get("focused")), None)
@@ -213,11 +256,10 @@ def main():
         return 1
 
     panes = hc.list_panes(workspace)
-    existing = map_panes(panes)
+    existing = map_panes(panes) + dead_views(panes, MAP_LABEL)
     if existing:
         for pane_id in existing:
-            if hc.call_quiet("plugin", "pane", "close", pane_id) is None:
-                hc.call_quiet("pane", "close", pane_id)
+            close_view(pane_id)
         return 0
     # One map per tab that runs an agent, so every agent tab shows the team.
     tabs = agent_tabs(panes)
