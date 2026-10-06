@@ -337,6 +337,24 @@ class ReportMessageJourneyTest(JourneyCase):
         self.assertEqual(code, 1)
         self.assertIn("that is you", err)
 
+    def test_reports_and_messages_leave_a_signal_the_map_animates(self):
+        self.init_team()
+        fe = self.hire("fe", "frontend")
+
+        def signal(pane):
+            return hc.parse_signal(self.herdr.pane(pane)["tokens"].get(hc.TOKEN_SIGNAL))
+
+        self.ok("report", "tests 3/5 passing", pane=fe)
+        self.assertEqual(signal(fe)[:2], ("report", None))  # None: toward its parent
+        self.ok("report", "--needs-you", "Postgres or SQLite?", pane=fe)
+        self.assertEqual(signal(fe)[:2], ("needs", None))
+        self.ok("message", "orchestrator", "login", "done", pane=fe)
+        self.assertEqual(signal(fe)[:2], ("msg", self.orch))
+        self.ok("message", "fe", "please add tests")
+        self.assertEqual(signal(self.orch)[:2], ("msg", fe))
+        self.ok("report", "--clear", pane=fe)
+        self.assertEqual(signal(fe)[:2], ("msg", self.orch), "clearing the status sends nothing")
+
 
 class RespawnJourneyTest(JourneyCase):
     def test_respawn_keeps_the_conversation_applies_profile_and_waits_for_idle(self):

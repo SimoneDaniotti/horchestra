@@ -11,11 +11,13 @@ import curses
 import locale
 import os
 import re
+import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import activity  # noqa: E402
 import herdr_client as hc  # noqa: E402
 import views  # noqa: E402
 
@@ -26,6 +28,16 @@ FOOTER_ROWS = 2
 DETAILS_ROWS = 8
 GRAPH_MIN_WIDTH = 60
 MODES = ["auto", "cards", "graph", "compact"]
+FRAME_SECONDS = 0.12  # edge animation step
+SIGNAL_SHOW = 6.0  # seconds a report/message pulse runs once seen
+SIGNAL_FRESH = 30.0  # older signals (e.g. from before the map opened) are not replayed
+SIGNAL_STYLES = {"report": "reply", "needs": "alert", "msg": "message"}
+MAP_MIN_ROWS = 8  # the activity plot never squeezes the map below this
+MIN_LANES = 2
+NOTICE_SECONDS = 6.0
+ZOOM_KINDS = ("claude", "codex")  # agents zoetrope can draw
+DOCK_KEYS = {ord("W"): "top", ord("A"): "left", ord("S"): "bottom", ord("D"): "right"}
+TOGGLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toggle.py")
 
 
 # ---- data -----------------------------------------------------------------
@@ -112,6 +124,19 @@ def build_overview(panes, workspaces, own_pane_id, own_workspace, collapsed, sel
     return roots, raw
 
 
+def animation_enabled():
+    """Edge animation: HORCHESTRA_ANIMATE, else the plugin config file `animate`."""
+    raw = os.environ.get("HORCHESTRA_ANIMATE")
+    config_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
+    if raw is None and config_dir:
+        try:
+            with open(os.path.join(config_dir, "animate")) as fh:
+                raw = fh.read()
+        except OSError:
+            pass
+    return (raw or "1").strip().lower() not in ("0", "off", "false", "no")
+
+
 def herdr_prefix():
     """The user's Herdr prefix key, for the help overlay (best effort)."""
     path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
@@ -137,6 +162,10 @@ def help_lines(overview):
         ("Space", "fold / unfold"),
         ("v", "cycle views"),
         ("i", "details box"),
+        ("t", "activity plot"),
+        ("[ ]", "activity: shorter / longer"),
+        ("z", "zoom into agent (zoetrope)"),
+        ("W A S D (shift)", "dock " + ("overview" if overview else "maps") + ": top / left / bottom / right"),
         ("r", "refresh"),
         ("q", "close this map"),
         ("?", "show / hide help"),
@@ -239,6 +268,16 @@ class App:
         self.messages = {}  # pane_id -> (monotonic time, text)
         self.styles = {}
         self.watcher = hc.EventWatcher()
+        self.activity = activity.Activity()
+        self.show_activity = True
+        self.window = 1  # index into activity.WINDOWS
+        self.animate = animation_enabled()
+        self.animating = False
+        self.last_draw = 0.0
+        self.notice = (0.0, "")
+        self._lanes_cache = (None, [])
+        self.signals = {}  # pane_id -> epoch of the last signal seen
+        self.flows = []  # [(from key, to key or None for the parent, style, monotonic end)]
 
     # ---- data ---------------------------------------------------------------
 
@@ -284,8 +323,38 @@ class App:
         self.watcher.watch_panes(
             p["pane_id"] for p in self.panes if p.get("agent") and p.get("pane_id")
         )
+        self.collect_signals()
+        try:
+            self.activity.update(self.panes)
+        except (OSError, ValueError, TypeError):
+            pass  # the plot is a nicety; never let it take the map down
         self.messages.pop(self.selected, None)  # refetch the selected agent's output
         self.rebuild()
+
+    def collect_signals(self, now=None):
+        """Turn new report/message signals on panes into short-lived flows."""
+        now = time.time() if now is None else now
+        for pane in self.panes:
+            key = pane.get("pane_id")
+            signal = hc.parse_signal(tokens_of(pane).get(hc.TOKEN_SIGNAL))
+            if not key or not signal or self.signals.get(key) == signal[2]:
+                continue
+            self.signals[key] = signal[2]
+            kind, to, epoch = signal
+            if now - epoch <= SIGNAL_FRESH:
+                self.flows.append((key, to, SIGNAL_STYLES[kind], time.monotonic() + SIGNAL_SHOW))
+
+    def draw_flows(self, canvas, frame):
+        """Pulses from a reporting/messaging agent to its parent or receiver."""
+        now = time.monotonic()
+        self.flows = [f for f in self.flows if f[3] > now]
+        shown = False
+        for src, dst, style, _ in self.flows:
+            node = self.node(src)
+            target = (node.parent if node else None) if dst is None else self.node(dst)
+            if node and target:
+                shown |= views.animate_path(canvas, views.route(canvas, node, target), frame, style)
+        return shown
 
     def rebuild(self):
         if self.overview:
@@ -316,6 +385,39 @@ class App:
         text = last_message(hc.read_text(key, lines=40))
         self.messages[key] = (time.monotonic(), text)
         return text
+
+    def lanes(self, width):
+        """[(node, counts or None)] for the activity plot."""
+        window = activity.WINDOWS[self.window]
+        now = time.time()
+        stamp = (window, width, int(now), id(self.roots), self.selected)
+        if self._lanes_cache[0] == stamp:
+            return self._lanes_cache[1]  # animation frames redraw far more often than this changes
+        if self.overview:
+            groups = [(root, [n.key for n in self._subtree(root)]) for root in self.roots]
+        else:
+            groups = [(n, [n.key]) for n in self.order]
+        nodes = [g[0] for g in groups]
+        count = views.activity_spark_width([(n, None) for n in nodes], width) or 1
+        out = []
+        for node, keys in groups:
+            if not any(self.activity.has_history(k) for k in keys):
+                out.append((node, None))
+                continue
+            times = [t for k in keys for t in self.activity.times(k)]
+            out.append((node, activity.buckets(times, now, window, count)))
+        self._lanes_cache = (stamp, out)
+        return out
+
+    def _subtree(self, node):
+        out = []
+        for child in node.children:
+            out.append(child)
+            out.extend(self._subtree(child))
+        return out
+
+    def flash(self, text):
+        self.notice = (time.monotonic(), text)
 
     # ---- drawing ------------------------------------------------------------
 
@@ -365,9 +467,19 @@ class App:
 
         details = DETAILS_ROWS if self.show_details and h >= HEADER_ROWS + FOOTER_ROWS + DETAILS_ROWS + 8 else 0
         footer = FOOTER_ROWS if h > 12 else 0
-        top, bottom = HEADER_ROWS, h - footer - details
+        lanes, plot = [], 0
+        if self.show_activity and self.order and not self.show_help and not self.error:
+            lanes = self.lanes(w)
+            spare = h - HEADER_ROWS - footer - details - MAP_MIN_ROWS - 3  # title, axis, rule
+            if spare >= min(MIN_LANES, len(lanes)):
+                lanes = self._lane_window(lanes, spare)
+                plot = len(lanes) + 3
+            else:
+                lanes = []
+        top, bottom = HEADER_ROWS, h - footer - details - plot
         view_h = max(0, bottom - top)
         self.hits = []
+        self.animating = False
 
         if self.show_help:
             details = 0
@@ -383,16 +495,31 @@ class App:
             renderer = {"cards": views.render_cards, "graph": views.render_graph,
                         "compact": views.render_compact}[mode]
             canvas, boxes = renderer(self.roots, w)
+            frame = int(time.monotonic() / FRAME_SECONDS) if self.animate else 0
+            if self.animate:
+                working = {n.key for n in self.order if n.status == "working"}
+                self.animating = views.animate_edges(canvas, working, frame)
+            # Drawn over the working pulses: replies are rarer and short-lived.
+            # Still shown (without motion) when animation is off, until they expire.
+            flowing = self.draw_flows(canvas, frame)
+            self.animating = self.animating or flowing
             self.blit(canvas, boxes, top, view_h, w)
 
+        if plot:
+            self.draw_activity(lanes, bottom, w)
         if details and not self.show_help:
             self.draw_details(h - footer - details, details, w)
         if footer:
             self.put(h - 2, 0, "─" * w, attr["dim"])
             self.put(h - 1, 0, "▌", attr["here"])
-            here = "this space" if self.overview else "this tab"
-            # Most important first: narrow maps cut the end of this line.
-            self.put(h - 1, 1, f"{here}  ? keys  wasd move  v view", attr["dim"])
+            stamp, notice = self.notice
+            if notice and time.monotonic() - stamp < NOTICE_SECONDS:
+                self.put(h - 1, 1, notice, attr["status:blocked"])
+            else:
+                here = "this space" if self.overview else "this tab"
+                # Most important first: narrow maps cut the end of this line.
+                self.put(h - 1, 1, f"{here}  ? keys  z zoom  wasd move  v view", attr["dim"])
+        self.last_draw = time.monotonic()
         self.screen.noutrefresh()
         curses.doupdate()
 
@@ -418,6 +545,31 @@ class App:
         for key, (y0, y1, x0, x1) in boxes.items():
             self.hits.append((top + y0 - self.scroll_y, top + y1 - self.scroll_y,
                               x0 - self.scroll_x, x1 - self.scroll_x, key))
+
+    def _lane_window(self, lanes, rows):
+        """At most `rows` lanes, keeping the selected one in view."""
+        if len(lanes) <= rows:
+            return lanes
+        keys = [n.key for n, _ in lanes]
+        sel = self.selected
+        if self.overview:
+            node = self.node(sel)
+            while node is not None and node.parent is not None:
+                node = node.parent
+            sel = node.key if node else sel
+        i = keys.index(sel) if sel in keys else 0
+        start = max(0, min(i - rows // 2, len(lanes) - rows))
+        return lanes[start:start + rows]
+
+    def draw_activity(self, lanes, y, w):
+        self.put(y, 0, "─" * w, self.styles["dim"])
+        canvas, boxes = views.render_activity(
+            lanes, w, activity.window_label(activity.WINDOWS[self.window]), activity.sparkline)
+        for row in range(len(canvas.rows)):
+            for x, text, style in canvas.runs(row):
+                self.put(y + 1 + row, x, text, self.styles.get(style, 0))
+        for key, (y0, y1, x0, x1) in boxes.items():
+            self.hits.append((y + 1 + y0, y + 1 + y1, x0, x1, key))
 
     def draw_help(self, top, bottom, w):
         """Key list; descriptions that do not fit beside a key wrap below it."""
@@ -525,6 +677,52 @@ class App:
         else:
             hc.focus_pane(self.selected)
 
+    def zoom(self):
+        """Open the selected agent's session in zoetrope, over its pane."""
+        pane = self.raw.get(self.selected) or {}
+        ref = pane.get("agent_session") if isinstance(pane.get("agent_session"), dict) else {}
+        kind, session = pane.get("agent"), ref.get("value") if ref.get("kind") == "id" else None
+        if not pane:
+            self.flash("select an agent to zoom into")
+            return
+        if kind not in ZOOM_KINDS:
+            self.flash("zoom works for Claude and Codex agents")
+            return
+        if not session:
+            self.flash(f"no session id yet: herdr integration install {kind}")
+            return
+        base = ("plugin", "pane", "open",
+                "--plugin", os.environ.get("HERDR_PLUGIN_ID", "horchestra"),
+                "--entrypoint", "zoom",
+                "--env", f"HORCHESTRA_ZOOM_KIND={kind}",
+                "--env", f"HORCHESTRA_ZOOM_SESSION={session}")
+        # An overlay covers the active pane (this map, since its key was just
+        # pressed) and closing it returns here. Herdr refuses an overlay when
+        # this pane is not the active one; a tab beside the agent still works.
+        if hc.call_quiet(*base, "--placement", "overlay", "--focus") is not None:
+            return
+        workspace = pane.get("workspace_id") or self.workspace_id
+        if hc.call_quiet(*base, "--placement", "tab", "--workspace", workspace, "--focus") is None:
+            self.flash("could not open the zoom pane")
+
+    def redock(self, side):
+        """Move this view (every map in the space, or the overview) to `side`.
+
+        A detached toggle does the move: it closes this pane on the way.
+        """
+        mine = [p for p in self.panes if p.get("tab_id") == self.tab_id
+                and p.get("pane_id") != self.own_pane and not tokens_of(p).get(hc.TOKEN_VIEW)]
+        env = dict(os.environ, HERDR_WORKSPACE_ID=self.workspace_id,
+                   HERDR_PANE_ID=(mine[0]["pane_id"] if mine else self.own_pane))
+        argv = [sys.executable, TOGGLE, "--dock", side] + (["--overview"] if self.overview else [])
+        try:
+            subprocess.Popen(argv, env=env, cwd=os.path.dirname(TOGGLE), start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            self.flash(f"could not move: {exc}")
+            return
+        self.flash(f"moving to the {side}…")
+
     def on_mouse(self):
         try:
             _, mx, my, _, bstate = curses.getmouse()
@@ -578,6 +776,16 @@ class App:
             self.scroll_x = self.scroll_y = 0
         elif key == ord("i"):
             self.show_details = not self.show_details
+        elif key == ord("t"):
+            self.show_activity = not self.show_activity
+        elif key == ord("["):
+            self.window = max(0, self.window - 1)
+        elif key == ord("]"):
+            self.window = min(len(activity.WINDOWS) - 1, self.window + 1)
+        elif key == ord("z"):
+            self.zoom()
+        elif key in DOCK_KEYS:
+            self.redock(DOCK_KEYS[key])
         elif key == ord("r"):
             self.refresh()
         elif key == curses.KEY_MOUSE:
@@ -611,6 +819,8 @@ class App:
                 self.draw()
                 continue
             if self.sync_size():
+                self.draw()
+            if self.animating and time.monotonic() - self.last_draw >= FRAME_SECONDS:
                 self.draw()
             if self.watcher.changed.is_set():
                 time.sleep(DEBOUNCE_SECONDS)
@@ -656,6 +866,14 @@ def make_styles():
         "status:done": cp(3) | bold,
         "status:idle": dim,
         "status:unknown": dim,
+        "flow": cp(1),
+        "pulse": cp(1) | bold,
+        "reply": cp(3),
+        "reply_pulse": cp(3) | bold,
+        "alert": cp(2),
+        "alert_pulse": cp(2) | bold,
+        "message": cp(8),
+        "message_pulse": cp(8) | bold,
         "kind:claude": cp(6) | bold,
         "kind:codex": cp(3) | bold,
         "kind:gemini": cp(7) | bold,
@@ -669,7 +887,7 @@ def setup(screen, overview=False):
     curses.use_default_colors()
     curses.mousemask(curses.ALL_MOUSE_EVENTS)
     curses.mouseinterval(0)
-    screen.timeout(200)
+    screen.timeout(int(FRAME_SECONDS * 1000))
     screen.keypad(True)
     app = App(screen, overview=overview)
     app.styles = make_styles()

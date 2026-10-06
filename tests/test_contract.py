@@ -168,7 +168,7 @@ PLUGIN_READS = {
         "workspace_id": "team.resolve_space, agentmap.build_overview",
         "terminal_id": "agentmap.build_forest (parent edges), team.same_terminal",
         "agent": "team.sync, toggle.agent_tabs", "agent_status": "team.is_live, views",
-        "agent_session": "team.session_of", "label": "team.Space.by_label, toggle.dead_views",
+        "agent_session": "team.session_of, activity.Activity.update, agentmap.App.zoom", "label": "team.Space.by_label, toggle.dead_views",
         "tokens": "agentmap/toggle/team tokens_of", "terminal_title_stripped": "agentmap, team.cmd_scan",
         "cwd": "team.resolve_space", "foreground_cwd": "team.pane_owner", "focused": "toggle.open_map",
     },
@@ -1073,7 +1073,32 @@ class CommandShapeTest(FixtureTestCase):
                              team.resume_launch(space, "backend", "claude", "00000000-0000-4000-8000-000000000008"))
             team.start_agent(space.agent_name(team.ORCHESTRATOR), "claude", ORCH_PANE,
                              team.orchestrator_args(space, data))
+            self.zoom_from_map()
+            self.herdr.errors[("plugin", "pane", "open")] = ["invalid_params"]
+            self.zoom_from_map()  # overlay refused: falls back to a tab
         return self.herdr.calls
+
+    def zoom_from_map(self):
+        app = agentmap.App(None)
+        app.raw = {ORCH_PANE: hc.get_pane(ORCH_PANE)}
+        app.selected = ORCH_PANE
+        app.zoom()
+        return app
+
+    def test_zoom_opens_the_selected_session_in_an_overlay_then_a_tab(self):
+        session = hc.get_pane(ORCH_PANE)["agent_session"]["value"]
+        self.zoom_from_map()
+        self.herdr.errors[("plugin", "pane", "open")] = ["invalid_params"]
+        self.zoom_from_map()
+        opens = [c for c in self.herdr.calls if c[:3] == ["plugin", "pane", "open"]]
+        self.assertEqual(len(opens), 3)
+        placements = [c[c.index("--placement") + 1] for c in opens]
+        self.assertEqual(placements, ["overlay", "overlay", "tab"])
+        for call in opens:
+            self.assertIn(f"HORCHESTRA_ZOOM_SESSION={session}", call)
+            self.assertIn("HORCHESTRA_ZOOM_KIND=claude", call)
+            self.assertNotIn("--target-pane", call)  # Herdr: overlays target the active pane
+        self.assertEqual(opens[2][opens[2].index("--workspace") + 1], WORKSPACE)
 
     def test_every_argv_the_plugin_builds_at_runtime_is_valid(self):
         problems = []

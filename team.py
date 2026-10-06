@@ -1372,6 +1372,12 @@ def cmd_message(args):
         raise TeamError("give a message")
     # agent prompt queues the text even while the target is working.
     prompt(target["pane_id"], f"[horchestra] message from {sender}: {text}")
+    if me.get("pane_id"):
+        # Lets the agent map run a pulse from sender to receiver.
+        try:
+            hc.set_tokens(me["pane_id"], {hc.TOKEN_SIGNAL: hc.signal_value("msg", target["pane_id"])})
+        except hc.HerdrError:
+            pass  # the message itself went through
     print(f"sent to {target_role}")
 
 
@@ -1387,7 +1393,7 @@ def cmd_report(args):
     text = " ".join(" ".join(args.text).split())[:80]
     if not text:
         raise TeamError("give a short status text (or --clear)")
-    tokens = {hc.TOKEN_STATUS: text}
+    tokens = {hc.TOKEN_STATUS: text, hc.TOKEN_SIGNAL: hc.signal_value("needs" if args.needs_you else "report")}
     if args.needs_you:
         tokens[hc.TOKEN_NEEDS] = "1"
         hc.set_tokens(pane_id, tokens)

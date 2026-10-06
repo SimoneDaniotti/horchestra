@@ -25,6 +25,7 @@ TOKEN_TASK = "agentmap_task"  # member's task from team.toml (written by sync)
 TOKEN_STATUS = "agentmap_status"  # member-reported progress line
 TOKEN_NEEDS = "agentmap_needs"  # "1" while a member waits on the human
 TOKEN_PROFILE = "agentmap_profile"  # member's role profile summary (written by sync)
+TOKEN_SIGNAL = "agentmap_signal"  # "<report|needs|msg> <to pane or -> <epoch>": last report/message sent
 
 
 class HerdrError(Exception):
@@ -254,3 +255,16 @@ class EventWatcher(threading.Thread):
         else:
             self._global = []
         return False
+
+
+def signal_value(kind, to=None, now=None):
+    """TOKEN_SIGNAL value: the map animates `kind` from this pane to `to` (- = parent)."""
+    return f"{kind} {to or '-'} {int(now if now is not None else time.time())}"
+
+
+def parse_signal(value):
+    """(kind, to or None, epoch) from a TOKEN_SIGNAL value, or None if malformed."""
+    parts = value.split() if isinstance(value, str) else []
+    if len(parts) != 3 or parts[0] not in ("report", "needs", "msg") or not parts[2].isdigit():
+        return None
+    return parts[0], (None if parts[1] == "-" else parts[1]), int(parts[2])

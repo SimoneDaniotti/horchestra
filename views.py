@@ -73,6 +73,8 @@ class Canvas:
     def __init__(self, width):
         self.width = max(1, width)
         self.rows = []
+        # [(child key, [(y, x), ...])]: each parent->child edge, parent end first.
+        self.edges = []
 
     def ensure(self, y):
         while len(self.rows) <= y:
@@ -129,6 +131,9 @@ def render_compact(roots, width):
 
     def walk(node, prefix, last, depth):
         nonlocal y
+        if depth:
+            rail, top = 1 + len(prefix), boxes[node.parent.key][0] + 1
+            canvas.edges.append((node.key, [(ry, rail) for ry in range(top, y + 1)] + [(y, rail + 1)]))
         lead = "" if depth == 0 else prefix + ("└─ " if last else "├─ ")
         x = 1
         if node.selected:
@@ -207,6 +212,8 @@ def render_cards(roots, width):
             for ry in range(last_join, y + 1):
                 canvas.put(ry, rail, "│", "rail")
             canvas.put(y, rail, "├─", "rail")
+            top = boxes[node.key][1]
+            canvas.edges.append((child.key, [(ry, rail) for ry in range(top, y + 1)] + [(y, rail + 1)]))
             last_join = y + 1
             y = walk(child, x + CARD_INDENT, y)
         if kids:
@@ -284,6 +291,10 @@ def render_graph(roots, width):
             canvas.put(bar, center, "┼" if center in centers else "┴", "rail")
         for child, c in zip(kids, centers):
             canvas.put(boxes[child.key][0], c, "┴", _border_style(child))
+            step = 1 if c >= center else -1
+            path = [(y + 3, center), (y + 4, center)]
+            path += [(bar, bx_) for bx_ in range(center, c + step, step)]
+            canvas.edges.append((child.key, path + [(boxes[child.key][0], c)]))
         return center
 
     x = 1 + max(0, (canvas.width - total) // 2)
@@ -314,3 +325,128 @@ def _graph_box(canvas, node, y, x, w):
     canvas.put(y + 2, x + 1 + (inner - len(status)) // 2, status,
                "needs" if node.needs else "status:" + node.status)
     canvas.put(y + 3, x, "╰" + "─" * inner + "╯", style)
+
+
+# ---- live edges ------------------------------------------------------------
+
+HEAVY = str.maketrans("│─┬┴┼┌┐└┘├┤╭╮╰╯", "┃━┳┻╋┏┓┗┛┣┫┏┓┗┛")
+PULSE_PERIOD = 6  # cells between pulses
+PULSE_LENGTH = 2
+
+
+def route(canvas, src, dst):
+    """Cells from node `src` to node `dst` along the drawn edges, or [].
+
+    Climbs from `src` to the nearest common ancestor (edges walked child ->
+    parent), then descends to `dst`. Empty when either end is hidden (a
+    folded subtree draws no edge) or the two are not connected.
+    """
+    edges = dict(canvas.edges)
+    above = []
+    node = dst
+    while node is not None:
+        above.append(node)
+        node = node.parent
+    up, node = [], src
+    while node is not None and node not in above:
+        up.append(node)
+        node = node.parent
+    if node is None:
+        return []
+    down = above[: above.index(node)]
+    cells = []
+    for n in up:
+        if n.key not in edges:
+            return []
+        cells += list(reversed(edges[n.key]))
+    for n in reversed(down):
+        if n.key not in edges:
+            return []
+        cells += edges[n.key]
+    out = []
+    for cell in cells:  # a shared joint appears once
+        if not out or out[-1] != cell:
+            out.append(cell)
+    return out
+
+
+def animate_path(canvas, path, frame, style):
+    """Run pulses along `path` (first cell first) in `<style>` / `<style>_pulse`."""
+    for i, (y, x) in enumerate(path):
+        if 0 <= y < len(canvas.rows) and 0 <= x < canvas.width:
+            ch = canvas.rows[y][x][0]
+            if ch == " ":
+                continue
+            if (i - frame) % PULSE_PERIOD < PULSE_LENGTH:
+                canvas.rows[y][x] = [ch.translate(HEAVY), style + "_pulse"]
+            else:
+                canvas.rows[y][x] = [ch, style]
+    return bool(path)
+
+
+def animate_edges(canvas, active, frame):
+    """Light up the edges into `active` child keys; a pulse runs parent -> child.
+
+    Edge cells take the "flow" style; every PULSE_PERIOD cells a short run
+    turns heavy in "pulse" style, shifted one cell per frame.
+    """
+    lit = {}
+    for key, path in canvas.edges:
+        if key not in active:
+            continue
+        for i, cell in enumerate(path):
+            pulse = (i - frame) % PULSE_PERIOD < PULSE_LENGTH
+            lit[cell] = lit.get(cell, False) or pulse
+    for (y, x), pulse in lit.items():
+        if 0 <= y < len(canvas.rows) and 0 <= x < canvas.width:
+            ch = canvas.rows[y][x][0]
+            if ch == " ":
+                continue
+            canvas.rows[y][x] = [ch.translate(HEAVY), "pulse"] if pulse else [ch, "flow"]
+    return bool(lit)
+
+
+# ---- activity plot ---------------------------------------------------------
+
+
+def render_activity(lanes, width, window_text, spark):
+    """One row per lane: status, name, and an activity sparkline.
+
+    `lanes` is [(node, counts or None)]: None means no history for that agent.
+    `spark(counts, peak)` turns counts into characters; one peak is shared by
+    every lane so their heights compare. Returns the canvas and lane boxes.
+    """
+    canvas, boxes = Canvas(width), {}
+    canvas.put(0, 1, "ACTIVITY", "accent")
+    hint = f"last {window_text}  [ ]"
+    canvas.put(0, max(10, width - len(hint) - 1), hint, "dim")
+    name_w, spark_x, spark_w = _activity_columns(lanes, width)
+    peak = max([max(c) for _, c in lanes if c] + [0])
+    for i, (node, counts) in enumerate(lanes):
+        y = 1 + i
+        glyph, _ = STATUS[node.status]
+        canvas.put(y, 1, glyph, "status:" + node.status)
+        canvas.put(y, 3, _fit(node.name, name_w), "selname" if node.selected else "name")
+        if counts is None:
+            canvas.put(y, spark_x, _fit("no history yet", spark_w), "dim")
+        elif spark_w:
+            canvas.put(y, spark_x, spark(counts[-spark_w:], peak), node.icon[1])
+        boxes[node.key] = (y, y, 0, width - 1)
+    axis = 1 + len(lanes)
+    if spark_w >= 10:
+        canvas.put(axis, spark_x, "-" + window_text, "dim")
+        canvas.put(axis, spark_x + spark_w - 3, "now", "dim")
+    return canvas, boxes
+
+
+def _activity_columns(lanes, width):
+    """(name width, sparkline x, sparkline width) for render_activity."""
+    names = [len(node.name) for node, _ in lanes] or [4]
+    name_w = max(4, min(max(names), 14, max(6, width // 4)))
+    spark_x = 3 + name_w + 1
+    return name_w, spark_x, max(0, width - spark_x - 1)
+
+
+def activity_spark_width(lanes, width):
+    """How many slices render_activity draws per lane at this width."""
+    return _activity_columns(lanes, width)[2]
