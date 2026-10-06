@@ -40,7 +40,7 @@ in the project at `.orchestra/roles/<role>/`:
 <folder>`). Add `--uses-skill <name>` for existing project or user skills the
 member must use, `--only-skill <name>` (repeatable) to restrict it to an
 allowlist (its role skills stay allowed; every other skill found on disk is
-blocked), and `--deny-skill <name-or-pattern>` (e.g. `media-kit*`) to block
+blocked), and `--deny-skill <name-or-pattern>` (e.g. `legacy-*`) to block
 specific skills. `horchestra-team roles` lists profiles.
 A profile applies when a member is started. To apply a new or changed
 profile to a running Claude member (including adopted ones) without losing

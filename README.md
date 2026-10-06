@@ -1,5 +1,7 @@
 # Horchestra
 
+[![ci](https://github.com/SimoneDaniotti/horchestra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SimoneDaniotti/horchestra/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/SimoneDaniotti/horchestra/branch/main/graph/badge.svg)](https://codecov.io/gh/SimoneDaniotti/horchestra) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Orchestrator-led agent teams for [Herdr](https://herdr.dev), with a live
 agent map in every tab.
 
@@ -39,9 +41,9 @@ herdr plugin install SimoneDaniotti/horchestra
 herdr plugin action invoke horchestra.setup
 ```
 
-`plugin install` clones over HTTPS with your own git credentials. For a
-private repository you need read access and a git credential helper for
-GitHub; with the GitHub CLI, `gh auth setup-git` sets that up.
+`plugin install` clones the public repository over HTTPS and needs no
+credentials. Installing from a private fork needs git credentials (for
+example `gh auth setup-git`).
 
 `setup` adds the pieces that live outside the plugin directory, and prints
 what it did:
@@ -52,7 +54,15 @@ what it did:
 | `orchestrator` Claude Code session agent | symlink in `~/.claude/agents` |
 | `prefix+m` toggles the maps, `prefix+M` the all-spaces overview | marked block in `~/.config/herdr/config.toml`, only for keys that are free |
 
-It never overwrites files it did not create. It also checks that Herdr's
+It never overwrites files it did not create. A symlink in `~/.local/bin` or
+`~/.claude/agents` is replaced (setup) or removed (teardown) only if it points
+into a Horchestra plugin directory (one whose `herdr-plugin.toml` has id
+`horchestra`, or the legacy `agent-map`). Your own symlinks with the same
+names (say, an `orchestrator.md` from your dotfiles) are left alone: setup
+reports them as SKIPPED and teardown as kept. Edits to Herdr's `config.toml`
+are atomic and keep the file's permissions; a symlinked `config.toml` is
+written through to its target. If an edit would make a valid config invalid
+TOML, setup or teardown reports an ERROR and leaves the file unchanged. It also checks that Herdr's
 Claude/Codex integrations are current (needed to resume agents after a Herdr
 restart) and suggests turning on notifications if they are off.
 
@@ -129,7 +139,7 @@ kind = "claude"
 task = "Designs the quarterly review deck in web/checkout/"
 session = "a3ff62c9-…"
 # reports_to = "research"   # nest under another member
-# cwd = "presentation"      # relative to team.toml
+# cwd = "web"               # relative folder inside the project
 # args = ["--model", "sonnet"]
 ```
 
@@ -139,26 +149,56 @@ session = "a3ff62c9-…"
 | `horchestra-team scan` | list running agents in the space that are not on the team |
 | `horchestra-team adopt <pane> --role R [--task T]` | add a running agent, unchanged |
 | `horchestra-team hire R --kind K --task T [--profile P] [--only-skill S] [--uses-skill S] [--deny-skill S]` | add a member: own tab named after the role, start the agent with its role profile, send its brief |
-| `horchestra-team fire R` | remove a member and close its pane |
+| `horchestra-team fire R` | remove a member from team.toml and close its pane (refused for `orchestrator`; see below) |
 | `horchestra-team status` | show the team, with each member's latest reported line |
 | `horchestra-team message R "text"` | send a message to a team agent by role (e.g. `orchestrator`); queued if it is busy |
 | `horchestra-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
 | `horchestra-team roles` | list role profiles in `.orchestra/roles` and who uses them |
 | `horchestra-team respawn R \| --all` | restart a Claude agent in place with its current profile, keeping its conversation |
 | `horchestra-team reopen` | recreate a closed space from team.toml: one tab per role, every agent resumed with its conversation and profile |
+| `horchestra-team forget` | stop restoring the current team after Herdr restarts (`up` registers it again) |
 | `horchestra-team up` | start `claude --agent orchestrator` in the current pane (also the `horchestra.team-up` action) |
+
+Which commands create team.toml: only `up`, `init` and `adopt`, and they
+refuse to do so directly in your home folder or at `/` unless you pass
+`--file PATH` (a `.git` in your home folder, such as a dotfiles repo, does not
+make it a project root). `scan` and `roles` work without a team.toml and never
+create or register one; `status`, `sync`, `hire`, `fire`, `message` and
+`respawn` never create one either.
+
+team.toml is type-checked on load and errors name the field (e.g.
+`member[0] (qa).args must be a list of strings`). `args = "x y"` (a single
+string) is treated as one argument. `cwd` must be a relative folder inside the
+project. Horchestra honours `CLAUDE_CONFIG_DIR`: it looks for the orchestrator
+agent at `$CLAUDE_CONFIG_DIR/agents/orchestrator.md` and for resumable
+sessions in `$CLAUDE_CONFIG_DIR/projects` (default `~/.claude`).
+
+`fire R` works only for a member listed in team.toml (never `orchestrator`); a
+pane that merely carries the `team:R` label is not closed. It closes the pane
+only if that pane runs the session recorded in team.toml. If no session is
+recorded yet, the pane must carry the `team:R` label and the map's role tag,
+and no other pane may have the same label. Otherwise the member is still
+removed from team.toml, the pane stays open, and a note names it. If `hire`
+fails after the pane was created or the agent started (e.g. a folder-trust
+prompt timed out), the member stays in team.toml: answer the prompt in the
+named pane, then run `horchestra-team sync`. `sync` reports stray `team:*`
+panes and tells you to close them by hand.
 
 Names stay in step with roles:
 
 - each hired member gets its own tab named after its role, and every
   `horchestra-team` command renames an agent's tab to its role when it is the
-  only agent in that tab (set `name_tabs = false` in team.toml to turn off)
+  only agent in that tab, and only when that role's own agent is running there (set `name_tabs = false` in team.toml to turn off)
 - Claude members and the orchestrator are started with `--name <role>`, so the
   conversation (prompt box, `/resume` picker, terminal title) has the same
   name; `respawn` and the restart repair apply it again
 - panes are labelled `team:<role>`, and Herdr agent names are
-  `<project>-<role>` (e.g. `webshop-slides`) for
-  `herdr agent prompt <name> "…"`
+  `<folder>-<hash>-<role>` (e.g. `webshop-3f2a-slides`; the hash is a short
+  digest of the project path, so two projects with the same folder name do not
+  collide) for `herdr agent prompt <name> "…"`. A team whose pane already holds
+  the old plain name (`<folder>-<role>`) keeps it; if Herdr drops the name on
+  a restart, that member moves to the hashed name and restore re-applies it.
+  `horchestra-team message <role>` works either way, since it goes by role
 
 ### Role profiles: each member's own instructions and skills
 
@@ -175,17 +215,17 @@ Give a role its own context with a folder in the project:
 and team.toml can add skills to use or block:
 
 ```toml
-deny_skills = ["legacy:*"]                 # blocked for every hired member
+deny_skills = ["legacy-*"]                # blocked for every hired member
 
 [[member]]
 role = "slides"
-only_skills = ["slide-kit"]         # allowlist (role-folder skills stay allowed)
-# uses_skills = ["slide-kit"]       # or: skills it must use, others still allowed
-# deny_skills = ["media-kit*"]         # block specific names or patterns
+only_skills = ["deck-style"]             # allowlist (role-folder skills stay allowed)
+# uses_skills = ["deck-style"]          # or: skills it must use, others still allowed
+# deny_skills = ["chart-kit"]           # block specific names or patterns
 ```
 
 `only_skills` puts "use only these skills" in the member's instructions and
-blocks every other skill found in `~/.claude/skills` and the project's
+blocks every other skill found in the user skills folder (`$CLAUDE_CONFIG_DIR/skills`, default `~/.claude/skills`) and the project's
 `.claude/skills`. Skills from Claude Code plugins and built-ins cannot be
 listed from disk, so for those only the instruction applies.
 
@@ -194,7 +234,15 @@ For a Claude member, hiring generates a session agent
 and starts it with `claude --agent horchestra-<role> --settings <deny rules>
 --add-dir <profile folder>`. The member still sees the project's own
 CLAUDE.md and skills. Other agent kinds get the same instructions in their
-first message.
+first message. Horchestra rewrites `.claude/agents/horchestra-<role>.md` only
+if it carries its `<!-- generated by horchestra` marker; if you wrote a file
+with that name yourself, hire and respawn stop with an error asking you to
+rename the file or the role.
+
+For Claude agents, `args` (in team.toml or `hire --arg`) may not contain flags
+Horchestra sets itself: `--agent`, `--settings`, `--add-dir`, `--resume`/`-r`,
+`--continue`/`-c`, `--system-prompt-snapshot`, `--name`/`-n`,
+`--append-system-prompt(-file)`, `--system-prompt(-file)`.
 
 What is and is not guaranteed (tested with Claude Code 2.1):
 
@@ -254,11 +302,28 @@ integrations are current. The plugin's startup hook then:
   a live handoff, where nothing restarted)
 - starts a fresh orchestrator in its pane if its conversation could not be
   resumed
-- reopens map panes, which come back as idle shells
+- closes and reopens map and overview panes, which come back as idle shells,
+  only when they keep their `horchestra-map` / `horchestra-overview` title,
+  run no agent, and have only an idle shell in the foreground (checked with
+  `herdr pane process-info`); panes titled with the pre-0.1 `Agent map` name
+  are never closed automatically
 - respawns every Claude member launched with a profile, because Herdr's plain
   `claude --resume` would bring back the instructions recorded when the
   conversation began; the orchestrator is refreshed from the current
   `orchestrator.md` the same way
+
+Restore repairs each team on its own: one broken team.toml, or a pane that
+disappears mid-way, does not stop the other teams; a failing team is retried
+and dropped after 3 failures. Registered team files that no longer exist are
+dropped. If two registered team.toml files share the same agent sessions (a
+copied project), only the team whose folder holds those agents' working
+directory is restored; when that cannot be told, both are skipped with a log
+message. Give the copy a fresh team.toml. `respawn` and the profile
+re-apply and orchestrator re-brief never restart or message a pane matched by
+label alone; two panes with the same `team:R` label are reported as ambiguous.
+`sync`/`status` never record the session of a pane found only by its label:
+a recorded session is replaced only by an agent Horchestra started, an
+explicit `adopt`/`init`, or a new conversation in the role's own terminal.
 
 Members whose conversation did not resume are reported to the orchestrator,
 never restarted automatically, so nothing runs twice. Results are in
@@ -278,8 +343,9 @@ It creates a space named after the project, opens one tab per role in team
 order, resumes each agent's own conversation with its profile and name
 (`claude --resume …`, `codex resume …`), reopens the maps, and tells the
 orchestrator who came back. A member whose conversation no longer exists on
-disk starts fresh with its task. It refuses while the team is still running
-somewhere. Extra panes, splits and scrollback are not restored; work on disk
+disk starts fresh with its task. It refuses while any pane, in any space, still runs one of the team's
+sessions or is a `team:<role>` pane inside the project folder; use `sync` in
+that space, or close those panes first. Extra panes, splits and scrollback are not restored; work on disk
 is untouched by closing a space, but an agent's in-progress turn is lost, so
 close when agents are idle.
 
@@ -346,7 +412,7 @@ and `hire` start agents on your machine. Read `install.py` and
   so it cannot `report` or `message`; the orchestrator can still message it
   and read its output.
 - Hiring a Claude member writes `.claude/agents/horchestra-<role>.md` into the
-  project; commit it or add `.claude/agents/orchestra-*.md` to `.gitignore`.
+  project; commit it or add `.claude/agents/horchestra-*.md` to `.gitignore`.
 
 ## Development
 
