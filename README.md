@@ -10,6 +10,9 @@ there, hires new ones when the work needs them, and keeps the team in a
 `team.toml` you can read and edit. Every agent tab gets a map of the team;
 the agents in the tab you are looking at are highlighted.
 
+![A team at work: pulses run down the edges to working agents, reports run back up in green, a message crosses the tree in magenta, a needs-you flag turns red, and the activity plot fills in](docs/images/demo.gif)
+<sub>Yellow: working · green: reported back · magenta: a message between agents · red: needs you. The activity plot underneath is read from each agent's own transcript. (A scripted demo team, sped up: `tools/demo/`.)</sub>
+
 <table>
 <tr>
 <td><img src="docs/images/map-cards.png" alt="Agent map, cards view: an orchestrator, nested members, a needs-you flag and the details box" width="360"></td>
@@ -460,7 +463,9 @@ python3 -m unittest discover -s tests -t .
 
 README screenshots are real map output: `herdr pane read <map-pane> --format ansi
 > map.ansi`, then `python3 tools/ansi2html.py map.ansi map.html --squeeze` and a
-headless-browser screenshot of the page.
+headless-browser screenshot of the page. The animated demo is the real map
+driven by a scripted team and a stand-in `herdr` (`tools/demo/`); record it
+with [vhs](https://github.com/charmbracelet/vhs): `vhs tools/demo/demo.tape`.
 
 ## Credits
 
