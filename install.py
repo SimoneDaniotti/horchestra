@@ -4,8 +4,8 @@
 `herdr plugin install` only registers the plugin. This adds what lives
 outside the plugin directory, and `teardown` removes exactly that:
 
-- `horchestra-team` and `horchestra-tag` symlinks in ~/.local/bin (plus the
-  deprecated `agentmap-team` / `agentmap-tag` aliases, kept for one version)
+- `horchestra-team` and `horchestra-tag` symlinks in ~/.local/bin (and, only
+  where a pre-0.1 install linked them, the deprecated `agentmap-*` aliases)
 - the `orchestrator` Claude Code session agent in ~/.claude/agents
 - `prefix+m` (maps in this space) and `prefix+shift+m` (all-spaces
   overview), in a marked block of Herdr's config.toml (only keys that are free)
@@ -39,9 +39,13 @@ BLOCK_RE = re.compile(r"# >>> (?:horchestra|herdr-orchestra)\b.*?# <<< (?:horche
 LINKS = [
     ("bin/horchestra-team", os.path.join(BIN_DIR, "horchestra-team")),
     ("bin/horchestra-tag", os.path.join(BIN_DIR, "horchestra-tag")),
-    ("bin/agentmap-team", os.path.join(BIN_DIR, "agentmap-team")),  # deprecated alias
-    ("bin/agentmap-tag", os.path.join(BIN_DIR, "agentmap-tag")),  # deprecated alias
     ("agents/orchestrator.md", os.path.join(AGENTS_DIR, "orchestrator.md")),
+]
+# Deprecated pre-0.1 command names: only kept up to date where an older
+# install already linked them (running agents may still call them).
+LEGACY_LINKS = [
+    ("bin/agentmap-team", os.path.join(BIN_DIR, "agentmap-team")),
+    ("bin/agentmap-tag", os.path.join(BIN_DIR, "agentmap-tag")),
 ]
 
 
@@ -74,7 +78,8 @@ def is_ours(dest, source_rel):
 
 
 def install_links(report):
-    for source_rel, dest in LINKS:
+    legacy = [(src, dest) for src, dest in LEGACY_LINKS if is_ours(dest, src)]
+    for source_rel, dest in LINKS + legacy:
         source = os.path.join(ROOT, source_rel)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if os.path.islink(dest) and os.readlink(dest) == source:
@@ -92,7 +97,7 @@ def install_links(report):
 
 
 def remove_links(report):
-    for source_rel, dest in LINKS:
+    for source_rel, dest in LINKS + LEGACY_LINKS:
         if is_ours(dest, source_rel):
             os.remove(dest)
             report(f"removed  {dest}")

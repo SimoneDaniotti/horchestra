@@ -56,8 +56,12 @@ class LinkTest(unittest.TestCase):
         install.LINKS = [("bin/horchestra-team", os.path.join(home, "bin", "horchestra-team")),
                          ("agents/orchestrator.md", os.path.join(home, "agents", "orchestrator.md"))]
 
+        self.saved_legacy = install.LEGACY_LINKS
+        install.LEGACY_LINKS = [("bin/agentmap-team", os.path.join(home, "bin", "agentmap-team"))]
+
     def tearDown(self):
         install.LINKS, install.BIN_DIR = self.saved
+        install.LEGACY_LINKS = self.saved_legacy
         self.tmp.cleanup()
 
     def test_install_and_teardown_round_trip(self):
@@ -87,6 +91,18 @@ class LinkTest(unittest.TestCase):
         os.symlink("/old/place/herdr-agent-map/orchestrator.md", dest)
         install.install_links(lambda _line: None)
         self.assertEqual(os.readlink(dest), os.path.join(install.ROOT, "agents/orchestrator.md"))
+
+
+    def test_legacy_alias_only_refreshed_when_already_installed(self):
+        alias = install.LEGACY_LINKS[0][1]
+        install.install_links(lambda _line: None)
+        self.assertFalse(os.path.lexists(alias))  # fresh install: no alias
+        os.makedirs(os.path.dirname(alias), exist_ok=True)
+        os.symlink("/old/checkout/bin/agentmap-team", alias)
+        install.install_links(lambda _line: None)
+        self.assertEqual(os.readlink(alias), os.path.join(install.ROOT, "bin/agentmap-team"))
+        install.remove_links(lambda _line: None)
+        self.assertFalse(os.path.lexists(alias))
 
 
 if __name__ == "__main__":
