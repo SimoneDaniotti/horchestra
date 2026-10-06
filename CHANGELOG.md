@@ -6,6 +6,9 @@ First version, published as Horchestra (plugin id `horchestra`; commands
 `horchestra-team` / `horchestra-tag`; `agentmap-team` / `agentmap-tag` remain
 as deprecated aliases for this version). Requires Herdr 0.9.3+ and, for Claude features, Claude Code 2.1+.
 
+- `horchestra-team reopen`: rebuild a closed space with every agent's
+  conversation (Claude and Codex).
+- All-spaces overview (`prefix+M`) and an in-map key list (`?`).
 - Agent map pane in every agent tab: cards, top-down graph (auto when wide),
   and compact views; current-tab highlight; details box; mouse and keyboard.
 - `claude --agent orchestrator` session agent that registers itself, adopts

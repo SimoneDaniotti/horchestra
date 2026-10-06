@@ -8,24 +8,19 @@ there, hires new ones when the work needs them, and keeps the team in a
 `team.toml` you can read and edit. Every agent tab gets a map of the team;
 the agents in the tab you are looking at are highlighted.
 
-```text
- AGENT MAP            [cards]      zoomed map ([graph])
- webshop
- !1 ●2 ○1                                ╭────────────────╮
-──────────────────────────────           │ ✻ orchestrator │
-╭────────────────────────────╮           │   ● working    │
-│ ✻ orchestrator   ● working │           ╰────────┬───────╯
-│ coordinates the team       │             ┌──────┴────────┐
-╰┬───────────────────────────╯      ╭──────┴─────╮   ╭─────┴────╮
- ├─╭─────────────────────────╮      │ ◆ research │   │ ✻ slides │
-▌│ │ ✻ slides         ○ idle │      │ ● working  │   │  ○ idle  │
-▌│ │ deck 40%: 6/15 slides   │      ╰──────┬─────╯   ╰──────────╯
-▌│ ╰─────────────────────────╯      ╭──────┴──────╮
- └─╭─────────────────────────╮      │    ✻ QA     │
-   │ ◆ research    ● working │      │ ! needs you │
-   │ Researches rate limits  │      ╰─────────────╯
-   ╰─────────────────────────╯
-```
+<table>
+<tr>
+<td><img src="docs/images/map-cards.png" alt="Agent map, cards view: an orchestrator and four members with live status lines" width="330"></td>
+<td><img src="docs/images/map-graph.png" alt="Agent map, graph view of the same team" width="420"></td>
+</tr>
+<tr>
+<td align="center"><sub>Map in every agent tab (cards)</sub></td>
+<td align="center"><sub>Same team as a graph</sub></td>
+</tr>
+</table>
+
+![All-spaces overview: every space side by side with its team](docs/images/overview.png)
+<sub>`prefix+M`: the all-spaces overview along the bottom of a tab</sub>
 
 ## Requirements
 
@@ -55,7 +50,7 @@ what it did:
 | --- | --- |
 | `horchestra-team`, `horchestra-tag` commands | symlinks in `~/.local/bin` |
 | `orchestrator` Claude Code session agent | symlink in `~/.claude/agents` |
-| `prefix+m` toggles the maps | marked block in `~/.config/herdr/config.toml`, only if the key is free |
+| `prefix+m` toggles the maps, `prefix+M` the all-spaces overview | marked block in `~/.config/herdr/config.toml`, only for keys that are free |
 
 It never overwrites files it did not create. It also checks that Herdr's
 Claude/Codex integrations are current (needed to resume agents after a Herdr
@@ -83,6 +78,10 @@ commands by hand.
 ## The map
 
 `prefix+m` shows or hides a map in every tab of the space that runs an agent.
+`prefix+M` (shift) shows or hides the **all-spaces overview**: a wide strip
+along the bottom of the current tab with every space side by side, each with
+its team underneath. Enter on a space switches to it; Enter on an agent jumps
+to it. Press `?` in any map to see every key.
 
 | Key / mouse | Action |
 | --- | --- |
@@ -93,6 +92,7 @@ commands by hand.
 | `v` | cycle views: auto → cards → graph → compact |
 | `i` | show or hide the details box (info) |
 | `r` / `q` | refresh / close this map |
+| `?` | show or hide the list of keys |
 
 - **cards**: one card per agent: icon, status, and a detail line (a
   needs-you question, the agent's reported status, or its task).
@@ -101,7 +101,9 @@ commands by hand.
 - **compact**: one line per agent.
 - `▌` (cyan) marks agents in the map's own tab.
 - The **details box** shows the selected agent's kind, state and for how
-  long, tab, reported status, task, and the last thing it said.
+  long, tab, reported status, task, and the last thing it said:
+
+  <img src="docs/images/details.png" alt="Details box for a selected agent" width="420">
 
 Icons: `✻` Claude · `◆` Codex · `✦` Gemini · `π` Pi.
 Status: `●` working · `▲` blocked · `✓` done · `○` idle · `!` needs you.
@@ -142,6 +144,7 @@ session = "a3ff62c9-…"
 | `horchestra-team sync` | apply a hand-edited team.toml: start missing members, repair names and map links |
 | `horchestra-team roles` | list role profiles in `.orchestra/roles` and who uses them |
 | `horchestra-team respawn R \| --all` | restart a Claude agent in place with its current profile, keeping its conversation |
+| `horchestra-team reopen` | recreate a closed space from team.toml: one tab per role, every agent resumed with its conversation and profile |
 | `horchestra-team up` | start `claude --agent orchestrator` in the current pane (also the `horchestra.team-up` action) |
 
 Names stay in step with roles:
@@ -260,12 +263,32 @@ Members whose conversation did not resume are reported to the orchestrator,
 never restarted automatically, so nothing runs twice. Results are in
 `herdr plugin log list --plugin horchestra`.
 
+### Closing and reopening a space
+
+`team.toml` records every agent's conversation, so a team survives closing
+its whole space. From a shell in any space:
+
+```bash
+cd ~/path/to/project
+horchestra-team reopen
+```
+
+It creates a space named after the project, opens one tab per role in team
+order, resumes each agent's own conversation with its profile and name
+(`claude --resume …`, `codex resume …`), reopens the maps, and tells the
+orchestrator who came back. A member whose conversation no longer exists on
+disk starts fresh with its task. It refuses while the team is still running
+somewhere. Extra panes, splits and scrollback are not restored; work on disk
+is untouched by closing a space, but an agent's in-progress turn is lost, so
+close when agents are idle.
+
 ## Configuration
 
 | Setting | Where | Default |
 | --- | --- | --- |
 | Map width | a number in `$(herdr plugin config-dir horchestra)/width` | 32 |
 | Map toggle key | the managed block in Herdr's config, or bind `horchestra.toggle` yourself | `prefix+m` |
+| Overview key | the managed block, or bind `horchestra.overview` yourself | `prefix+M` (`prefix+shift+m`) |
 | Team-start key | bind the `horchestra.team-up` action | none |
 | Default member agent | `default_kind` in team.toml | `claude` |
 | Plugin state | `HORCHESTRA_STATE_DIR` | `~/.local/state/horchestra` |
@@ -318,6 +341,9 @@ and `hire` start agents on your machine. Read `install.py` and
 - Files in `~/.claude/agents` are also offered as subagents in every Claude
   session; the orchestrator's description asks Claude not to use it that way.
 - Manually tagged panes (`horchestra-tag`) lose their tags on a Herdr restart.
+- A Codex member running in a read-only sandbox cannot reach Herdr's socket,
+  so it cannot `report` or `message`; the orchestrator can still message it
+  and read its output.
 - Hiring a Claude member writes `.claude/agents/horchestra-<role>.md` into the
   project; commit it or add `.claude/agents/orchestra-*.md` to `.gitignore`.
 
