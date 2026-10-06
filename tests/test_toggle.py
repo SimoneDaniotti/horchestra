@@ -335,7 +335,7 @@ class EnsureMapsTest(Patched):
             pane("s2", tab="t2"),
         ]
         opened_for = []
-        def fake_open(ps, anchor):
+        def fake_open(ps, anchor, side=None):
             opened_for.append(anchor)
             return "new-" + anchor
         with mock.patch.object(toggle.hc, "list_panes", lambda ws: panes), \
@@ -348,7 +348,7 @@ class EnsureMapsTest(Patched):
         panes = [pane("m", tab="t1", view="all"), pane("x", tab="t1")]
         anchors = []
         with mock.patch.object(toggle.hc, "list_panes", lambda ws: panes), \
-                mock.patch.object(toggle, "open_map", lambda ps, a: anchors.append(a) or a):
+                mock.patch.object(toggle, "open_map", lambda ps, a, side=None: anchors.append(a) or a):
             toggle.ensure_maps("w1", {"t1", "gone"})
         self.assertEqual(len(anchors), 1)  # "gone" has no panes: skipped
 
@@ -357,7 +357,7 @@ class EnsureMapsTest(Patched):
                   [pane("a", tab="t1", agent="c"), pane("m", tab="t1", view="1")]]
         opened_for = []
         with mock.patch.object(toggle.hc, "list_panes", lambda ws: states.pop(0)), \
-                mock.patch.object(toggle, "open_map", lambda ps, a: opened_for.append(a)):
+                mock.patch.object(toggle, "open_map", lambda ps, a, side=None: opened_for.append(a)):
             toggle.ensure_maps("w1", ["t1", "t1"])
         self.assertEqual(opened_for, ["a"])
 
@@ -470,14 +470,14 @@ class MainTest(Patched):
     def test_opens_one_map_per_agent_tab(self):
         panes = [pane("a", tab="t1", agent="c"), pane("b", tab="t2", agent="c")]
         anchors = []
-        with mock.patch.object(toggle, "open_map", lambda ps, a: anchors.append(a)):
+        with mock.patch.object(toggle, "open_map", lambda ps, a, side=None: anchors.append(a)):
             code, _ = self.run_main(panes, {"HERDR_WORKSPACE_ID": "w1"})
         self.assertEqual((code, anchors), (0, ["a", "b"]))
 
     def test_no_agents_uses_focused_tab(self):
         panes = [pane("s1", tab="t1"), pane("s2", tab="t2")]
         anchors = []
-        with mock.patch.object(toggle, "open_map", lambda ps, a: anchors.append(a)):
+        with mock.patch.object(toggle, "open_map", lambda ps, a, side=None: anchors.append(a)):
             self.run_main(panes, {"HERDR_WORKSPACE_ID": "w1", "HERDR_PANE_ID": "s2"})
         self.assertEqual(anchors, ["s2"])
 
@@ -495,7 +495,7 @@ class MainTest(Patched):
         self.assertEqual(code, 1)
 
     def test_overview_flag_dispatches(self):
-        with mock.patch.object(toggle, "toggle_overview", lambda f: ("ov", f)):
+        with mock.patch.object(toggle, "toggle_overview", lambda f, side=None: ("ov", f)):
             code, _ = self.run_main([], {"HERDR_PANE_ID": "p"}, argv=("toggle.py", "--overview"))
         self.assertEqual(code, ("ov", "p"))
 
@@ -509,3 +509,120 @@ class MainTest(Patched):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DockSideTest(Patched):
+    """Docking a view on any side of the tab, and remembering the side."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.config = tmp.name
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("HORCHESTRA_WIDTH", "AGENTMAP_WIDTH", "HORCHESTRA_HEIGHT")}
+        env["HERDR_PLUGIN_CONFIG_DIR"] = self.config
+        self.env = mock.patch.dict(os.environ, env, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    # a 2x2 grid: a | c on top, b | d below; c is wider, b is taller
+    GRID = {"a": rect(0, 0, 50, 20), "b": rect(0, 20, 50, 30), "c": rect(50, 0, 80, 25), "d": rect(50, 25, 40, 25)}
+
+    def test_anchor_is_the_outermost_then_longest_pane_on_each_side(self):
+        self.assertEqual(toggle.edge_anchor(self.GRID, "left"), "b")
+        self.assertEqual(toggle.edge_anchor(self.GRID, "right"), "c")
+        self.assertEqual(toggle.edge_anchor(self.GRID, "top"), "c")
+        self.assertEqual(toggle.edge_anchor(self.GRID, "bottom"), "b")
+        self.assertEqual(toggle.edge_anchor(self.GRID, "right", skip={"c"}), "d")
+        self.assertIsNone(toggle.edge_anchor({}, "left"))
+
+    def dock(self, side, before, after, size):
+        rec = Recorder(opens=["V"])
+        seq = [before, after]
+        self.use(patched(rec, layout_for=lambda pid: {"panes": [{"pane_id": k, "rect": v}
+                                                                 for k, v in (seq.pop(0) if len(seq) > 1 else seq[0]).items()]}))
+        self.assertEqual(toggle.dock("map", "a", side, size), "V")
+        return rec
+
+    def test_right_and_bottom_split_without_swapping_and_shrink_toward_their_edge(self):
+        rec = self.dock("right", {"a": rect(0, 0, 50, 20), "V": rect(50, 0, 50, 20)}, {}, 32)
+        self.assertIn("right", rec.named("plugin", "pane", "open")[0])
+        self.assertEqual(rec.named("pane", "swap"), [])
+        self.assertEqual(rec.named("pane", "resize")[0][3], "right")
+        rec = self.dock("bottom", {"a": rect(0, 0, 50, 20), "V": rect(0, 20, 50, 20)}, {}, 14)
+        self.assertIn("down", rec.named("plugin", "pane", "open")[0])
+        self.assertEqual(rec.named("pane", "swap"), [])
+        self.assertEqual(rec.named("pane", "resize")[0][3], "down")
+
+    def test_top_splits_down_then_swaps_and_sizes_by_height(self):
+        rec = self.dock("top", {"V": rect(0, 0, 50, 10), "a": rect(0, 10, 50, 30)}, {}, 14)
+        self.assertIn("down", rec.named("plugin", "pane", "open")[0])
+        self.assertEqual(rec.named("pane", "swap"), [("pane", "swap", "--source-pane", "V", "--target-pane", "a")])
+        resize = rec.named("pane", "resize")[0]
+        self.assertEqual(resize[3], "down")  # 10 rows: grow away from the top edge
+        self.assertEqual(resize[5], f"{4 / 40:.4f}")
+
+    def test_open_map_uses_the_saved_side_and_its_size(self):
+        self.assertTrue(toggle.save_side("map", "bottom"))
+        self.assertEqual(toggle.view_side("map"), "bottom")
+        with open(os.path.join(self.config, "height"), "w") as fh:
+            fh.write("12")
+        docked = []
+        self.use(patched(Recorder(), layout_for=lambda pid: {"panes": [{"pane_id": "a", "rect": rect(0, 0, 80, 40)}]},
+                         dock=lambda entry, anchor, side, size, focus=False: docked.append((entry, anchor, side, size))))
+        toggle.open_map([pane("a")], "a")
+        toggle.open_map([pane("a")], "a", side="right")
+        self.assertEqual(docked, [("map", "a", "bottom", 12), ("map", "a", "right", 32)])
+
+    def test_sides_default_and_reject_junk(self):
+        self.assertEqual(toggle.view_side("map"), "left")
+        self.assertEqual(toggle.view_side("overview"), "bottom")
+        with open(os.path.join(self.config, "map_side"), "w") as fh:
+            fh.write("diagonal")
+        self.assertEqual(toggle.view_side("map"), "left")
+        self.assertFalse(toggle.save_side("map", "diagonal"))
+        with mock.patch.dict(os.environ, {"HERDR_PLUGIN_CONFIG_DIR": ""}):
+            self.assertFalse(toggle.save_side("map", "top"))
+
+    def test_redock_moves_every_map_in_the_space(self):
+        panes = [pane("m1", tab="t1", view="1"), pane("x1", tab="t1", agent="claude"),
+                 pane("x2", tab="t2", agent="codex"), pane("s3", tab="t3")]
+        closed, ensured = [], []
+        self.use(patched(Recorder(), close_view=closed.append,
+                         ensure_maps=lambda ws, tabs, side=None: ensured.append((ws, tabs, side)) or []))
+        with mock.patch.object(toggle.hc, "list_panes", lambda ws: panes), \
+                mock.patch.object(toggle, "is_plain_shell", lambda pid: False):
+            toggle.redock_maps("w1", "s3", "right")
+        self.assertEqual(closed, ["m1"])
+        self.assertEqual(ensured, [("w1", {"t1", "t2", "t3"}, "right")])
+        self.assertEqual(toggle.view_side("map"), "right")
+
+    def test_dock_flag_validates_and_dispatches(self):
+        calls = []
+        env = {"HERDR_WORKSPACE_ID": "w1", "HERDR_PANE_ID": "p"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(toggle, "redock_maps", lambda ws, f, side: calls.append(("maps", ws, f, side))), \
+                mock.patch.object(toggle, "toggle_overview", lambda f, side=None: calls.append(("ov", f, side)) or 0):
+            for argv in (["toggle.py", "--dock", "top"], ["toggle.py", "--overview", "--dock", "left"]):
+                with mock.patch.object(toggle.sys, "argv", argv):
+                    self.assertEqual(toggle.main(), 0)
+            with mock.patch.object(toggle.sys, "argv", ["toggle.py", "--dock", "up"]), \
+                    mock.patch("sys.stderr", io.StringIO()):
+                self.assertEqual(toggle.main(), 2)
+        self.assertEqual(calls, [("maps", "w1", "p", "top"), ("ov", "p", "left")])
+        self.assertEqual(toggle.view_side("overview"), "left")
+
+    def test_moving_the_overview_closes_it_and_opens_it_on_the_new_side(self):
+        listing = [{"panes": [pane("ov", tab="t1", view="all"), pane("a", tab="t1", focused=True)]},
+                   {"panes": [pane("a", tab="t1", focused=True)]}]
+        rec = Recorder()
+        rec.call = lambda *a, **k: listing.pop(0) if a[:2] == ("pane", "list") else {}
+        docked, closed = [], []
+        self.use(patched(rec, close_view=closed.append,
+                         layout_for=lambda pid: {"area": {"width": 200, "height": 50},
+                                                 "panes": [{"pane_id": "a", "rect": rect(0, 0, 200, 50)}]},
+                         dock=lambda entry, anchor, side, size, focus=False: docked.append((entry, anchor, side, size, focus))))
+        with mock.patch.object(toggle, "is_plain_shell", lambda pid: False):
+            self.assertEqual(toggle.toggle_overview("ov", side="right"), 0)
+        self.assertEqual(closed, ["ov"])
+        self.assertEqual(docked, [("overview", "a", "right", 90, True)])

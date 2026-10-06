@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Toggle the agent map pane in the invoking workspace.
 
-Closes any map pane already in the workspace; otherwise opens one docked at
-the left edge of the active tab and narrows it to HORCHESTRA_WIDTH columns
-(default 32, configurable in $HERDR_PLUGIN_CONFIG_DIR/width).
+Closes any map pane already in the workspace; otherwise opens one in every
+agent tab, docked at the side chosen in the map (shift+W/A/S/D; left by
+default) and sized to HORCHESTRA_WIDTH columns (default 32, configurable in
+$HERDR_PLUGIN_CONFIG_DIR/width) or, docked top or bottom, `height` rows.
+
+`--dock SIDE` remembers SIDE and moves the open maps there; with
+`--overview` it does the same for the all-spaces overview.
 """
 
 import json
@@ -15,6 +19,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import herdr_client as hc  # noqa: E402
 
 DEFAULT_WIDTH = 32
+DEFAULT_HEIGHT = 14
+SIDES = ("left", "right", "top", "bottom")
+DEFAULT_SIDE = {"map": "left", "overview": "bottom"}
+SHRINK = {"left": "left", "right": "right", "top": "up", "bottom": "down"}
+GROW = {"left": "right", "right": "left", "top": "down", "bottom": "up"}
 
 
 def context():
@@ -33,19 +42,51 @@ def find(ctx, *keys):
     return None
 
 
-def target_width():
+def read_config(name):
     config_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
-    raw = os.environ.get("HORCHESTRA_WIDTH") or os.environ.get("AGENTMAP_WIDTH")
-    if not raw and config_dir:
-        try:
-            with open(os.path.join(config_dir, "width")) as fh:
-                raw = fh.read().strip()
-        except OSError:
-            raw = None
+    if not config_dir:
+        return None
+    try:
+        with open(os.path.join(config_dir, name)) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def target_width():
+    raw = os.environ.get("HORCHESTRA_WIDTH") or os.environ.get("AGENTMAP_WIDTH") or read_config("width")
     try:
         return max(16, int(raw)) if raw else DEFAULT_WIDTH
     except ValueError:
         return DEFAULT_WIDTH
+
+
+def target_height():
+    raw = os.environ.get("HORCHESTRA_HEIGHT") or read_config("height")
+    try:
+        return max(8, int(raw)) if raw else DEFAULT_HEIGHT
+    except ValueError:
+        return DEFAULT_HEIGHT
+
+
+def view_side(view):
+    """Where `view` ("map" or "overview") docks: the saved choice or its default."""
+    side = (read_config(f"{view}_side") or "").lower()
+    return side if side in SIDES else DEFAULT_SIDE[view]
+
+
+def save_side(view, side):
+    """Remember the dock side (best effort: no config dir means no memory)."""
+    config_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
+    if side not in SIDES or not config_dir:
+        return False
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, f"{view}_side"), "w") as fh:
+            fh.write(side + "\n")
+        return True
+    except OSError:
+        return False
 
 
 def layout_for(pane_id):
@@ -128,7 +169,7 @@ def agent_tabs(panes):
     return {p.get("tab_id") for p in panes if p.get("agent") and not is_map(p) and p.get("tab_id")}
 
 
-def ensure_maps(workspace, tabs):
+def ensure_maps(workspace, tabs, side=None):
     """Open a map in each of `tabs` that does not have one yet."""
     opened = []
     for tab in sorted(t for t in tabs if t):
@@ -137,124 +178,147 @@ def ensure_maps(workspace, tabs):
             continue
         anchor = next((p["pane_id"] for p in panes if p.get("tab_id") == tab and not is_map(p)), None)
         if anchor:
-            opened.append(open_map(panes, anchor))
+            opened.append(open_map(panes, anchor, side))
     return opened
 
 
-def open_map(panes, focused):
-    """Open a map docked at the left edge of `focused`'s tab."""
-    if not focused or not any(p.get("pane_id") == focused for p in panes):
-        focused = next((p["pane_id"] for p in panes if p.get("focused")), None)
-        focused = focused or (panes[0]["pane_id"] if panes else None)
-    if not focused:
-        raise hc.HerdrError("no pane to dock against")
+def edge_anchor(boxes, side, skip=()):
+    """The pane along `side` of the tab to dock against: outermost, then longest."""
+    choices = {pid: r for pid, r in boxes.items() if pid not in skip} or boxes
+    if not choices:
+        return None
 
-    # Dock against the leftmost, tallest pane of the active tab.
-    boxes = rects(layout_for(focused))
-    anchor = min(
-        boxes,
-        key=lambda pid: (boxes[pid].get("x", 0), -boxes[pid].get("height", 0)),
-        default=focused,
-    )
+    def key(pid):
+        r = choices[pid]
+        x, y, w, h = r.get("x", 0), r.get("y", 0), r.get("width", 0), r.get("height", 0)
+        return {"left": (x, -h), "right": (-(x + w), -h), "top": (y, -w), "bottom": (-(y + h), -w)}[side]
 
+    return min(choices, key=key)
+
+
+def dock(entrypoint, anchor, side, size, focus=False):
+    """Open plugin pane `entrypoint` beside `anchor` on `side`, `size` cells deep."""
+    # Herdr splits only right or down; dock left/top by swapping afterwards.
     # Note: herdr 0.9.x rejects --workspace together with --target-pane.
     opened = hc.call(
         "plugin", "pane", "open",
         "--plugin", os.environ.get("HERDR_PLUGIN_ID", "horchestra"),
-        "--entrypoint", "map",
+        "--entrypoint", entrypoint,
         "--placement", "split",
         "--target-pane", anchor,
-        "--direction", "right",
-        "--no-focus",
-    )
-    map_pane = ((opened.get("plugin_pane") or {}).get("pane") or {}).get("pane_id")
-    if not map_pane:
-        return None
-    hc.call_quiet("pane", "swap", "--source-pane", map_pane, "--target-pane", anchor)
-
-    # Narrow the map: shift the shared divider left by the excess width.
-    width = target_width()
-    for _ in range(3):
-        boxes = rects(layout_for(map_pane))
-        mine, other = boxes.get(map_pane), boxes.get(anchor)
-        if not mine or not other:
-            break
-        total = mine.get("width", 0) + other.get("width", 0)
-        excess = mine.get("width", 0) - width
-        if total <= 0 or abs(excess) <= 1:
-            break
-        direction = "left" if excess > 0 else "right"
-        amount = f"{abs(excess) / total:.4f}"
-        if hc.call_quiet(
-            "pane", "resize", "--direction", direction, "--amount", amount, "--pane", map_pane
-        ) is None:
-            break
-    return map_pane
-
-
-def toggle_overview(focused):
-    """Close any all-spaces overview, or open one along the bottom of this tab."""
-    panes = [p for p in hc.call("pane", "list").get("panes") or [] if isinstance(p, dict)]
-    existing = [p["pane_id"] for p in panes if p.get("pane_id") and is_overview(p)]
-    existing += dead_views(panes, OVERVIEW_LABEL)
-    if existing:
-        for pane_id in existing:
-            close_view(pane_id)
-        return 0
-    if not focused:
-        focused = next((p["pane_id"] for p in panes if p.get("focused")), None)
-    if not focused:
-        raise hc.HerdrError("no focused pane")
-    layout = layout_for(focused)
-    boxes = rects(layout)
-    by_id = {p.get("pane_id"): p for p in panes}
-    # Split the widest pane along the bottom edge (never a map column).
-    bottom = max((r.get("y", 0) + r.get("height", 0) for r in boxes.values()), default=0)
-    candidates = [pid for pid, r in boxes.items()
-                  if r.get("y", 0) + r.get("height", 0) == bottom and not is_map(by_id.get(pid, {}))]
-    anchor = max(candidates or [focused], key=lambda pid: boxes.get(pid, {}).get("width", 0))
-    opened = hc.call(
-        "plugin", "pane", "open",
-        "--plugin", os.environ.get("HERDR_PLUGIN_ID", "horchestra"),
-        "--entrypoint", "overview",
-        "--placement", "split",
-        "--target-pane", anchor,
-        "--direction", "down",
-        "--focus",
+        "--direction", "right" if side in ("left", "right") else "down",
+        "--focus" if focus else "--no-focus",
     )
     pane_id = ((opened.get("plugin_pane") or {}).get("pane") or {}).get("pane_id")
     if not pane_id:
-        return 0
-    tab_h = (layout.get("area") or {}).get("height") or bottom
-    target = max(14, int(tab_h * OVERVIEW_SHARE))
+        return None
+    if side in ("left", "top"):
+        hc.call_quiet("pane", "swap", "--source-pane", pane_id, "--target-pane", anchor)
+    fit(pane_id, anchor, side, size)
+    return pane_id
+
+
+def fit(pane_id, anchor, side, size):
+    """Move the divider between `pane_id` and `anchor` until `pane_id` is `size` deep."""
+    axis = "width" if side in ("left", "right") else "height"
     for _ in range(3):
         boxes = rects(layout_for(pane_id))
         mine, other = boxes.get(pane_id), boxes.get(anchor)
         if not mine or not other:
             break
-        total = mine.get("height", 0) + other.get("height", 0)
-        excess = mine.get("height", 0) - target
+        total = mine.get(axis, 0) + other.get(axis, 0)
+        excess = mine.get(axis, 0) - size
         if total <= 0 or abs(excess) <= 1:
             break
-        direction = "down" if excess > 0 else "up"
+        direction = SHRINK[side] if excess > 0 else GROW[side]
         if hc.call_quiet("pane", "resize", "--direction", direction,
                          "--amount", f"{abs(excess) / total:.4f}", "--pane", pane_id) is None:
             break
+
+
+def open_map(panes, focused, side=None):
+    """Open a map docked at `side` (default: the saved side) of `focused`'s tab."""
+    if not focused or not any(p.get("pane_id") == focused for p in panes):
+        focused = next((p["pane_id"] for p in panes if p.get("focused")), None)
+        focused = focused or (panes[0]["pane_id"] if panes else None)
+    if not focused:
+        raise hc.HerdrError("no pane to dock against")
+    side = side or view_side("map")
+    views = {p.get("pane_id") for p in panes if (p.get("tokens") or {}).get(hc.TOKEN_VIEW)}
+    anchor = edge_anchor(rects(layout_for(focused)), side, skip=views) or focused
+    size = target_width() if side in ("left", "right") else target_height()
+    return dock("map", anchor, side, size)
+
+
+def overviews(panes):
+    return [p["pane_id"] for p in panes if p.get("pane_id") and is_overview(p)] + dead_views(panes, OVERVIEW_LABEL)
+
+
+def toggle_overview(focused, side=None):
+    """Close any all-spaces overview, or open one along a side of this tab.
+
+    With `side`, any open overview is moved there instead of toggled.
+    """
+    panes = [p for p in hc.call("pane", "list").get("panes") or [] if isinstance(p, dict)]
+    existing = overviews(panes)
+    for pane_id in existing:
+        close_view(pane_id)
+    if existing and not side:
+        return 0
+    if existing:
+        panes = [p for p in hc.call("pane", "list").get("panes") or [] if isinstance(p, dict)]
+    if not focused or focused in existing:
+        focused = next((p["pane_id"] for p in panes if p.get("focused")), None)
+    if not focused:
+        raise hc.HerdrError("no focused pane")
+    side = side or view_side("overview")
+    layout = layout_for(focused)
+    boxes = rects(layout)
+    by_id = {p.get("pane_id"): p for p in panes}
+    # Never dock against a map column.
+    maps = {pid for pid in boxes if is_map(by_id.get(pid, {}))}
+    anchor = edge_anchor(boxes, side, skip=maps) or focused
+    area = layout.get("area") or {}
+    axis = "width" if side in ("left", "right") else "height"
+    whole = area.get(axis) or max((r.get("x" if axis == "width" else "y", 0) + r.get(axis, 0)
+                                   for r in boxes.values()), default=0)
+    dock("overview", anchor, side, max(14, int(whole * OVERVIEW_SHARE)), focus=True)
     return 0
+
+
+def redock_maps(workspace, focused, side):
+    """Remember `side` and move every map in the workspace there."""
+    save_side("map", side)
+    panes = hc.list_panes(workspace)
+    tabs = {p.get("tab_id") for p in panes if is_map(p)} | agent_tabs(panes)
+    tabs |= {p.get("tab_id") for p in panes if p.get("pane_id") == focused}
+    for pane_id in map_panes(panes) + dead_views(panes, MAP_LABEL):
+        close_view(pane_id)
+    return ensure_maps(workspace, {t for t in tabs if t}, side)
 
 
 def main():
     ctx = context()
     workspace = find(ctx, "HERDR_WORKSPACE_ID", "workspace_id")
     focused = find(ctx, "HERDR_PANE_ID", "pane_id", "focused_pane_id")
-    if "--overview" in sys.argv[1:]:
-        return toggle_overview(focused)
+    args = sys.argv[1:]
+    side = args[args.index("--dock") + 1] if "--dock" in args[:-1] else None
+    if side is not None and side not in SIDES:
+        print(f"horchestra: --dock takes one of {', '.join(SIDES)}", file=sys.stderr)
+        return 2
+    if "--overview" in args:
+        if side:
+            save_side("overview", side)
+        return toggle_overview(focused, side)
     if not workspace and focused:
         workspace = hc.get_pane(focused).get("workspace_id")
     if not workspace:
         print("horchestra: no workspace context", file=sys.stderr)
         return 1
 
+    if side:
+        redock_maps(workspace, focused, side)
+        return 0
     panes = hc.list_panes(workspace)
     existing = map_panes(panes) + dead_views(panes, MAP_LABEL)
     if existing:
