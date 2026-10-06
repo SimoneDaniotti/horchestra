@@ -15,6 +15,11 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # id-token lets the Codecov upload authenticate with GitHub OIDC, so no
+    # CODECOV_TOKEN secret is needed.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -43,11 +48,12 @@ jobs:
         run: |
           python3.13 -m coverage report
           python3.13 -m coverage xml -o coverage.xml
-      # Codecov problems (e.g. no token yet) must never fail CI.
+      # Codecov problems must never fail CI. Pull requests from forks cannot
+      # request an OIDC token; Codecov accepts those uploads tokenless.
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
           files: coverage.xml
           fail_ci_if_error: false
 
