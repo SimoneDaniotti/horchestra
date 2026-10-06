@@ -128,24 +128,23 @@ def herdr_prefix():
 
 def help_lines(overview):
     prefix = herdr_prefix()
-    go = "go to space / focus agent" if overview else "focus agent's pane"
     return [
         ("KEYS IN THIS MAP", None),
         ("w s  ↑ ↓  k j", "move selection"),
-        ("a d  ← →  h l", "parent / first child"),
-        ("Enter, dbl-click", go),
+        ("a d  ← →  h l", "parent / child"),
+        ("Enter, 2×click", "go to space / agent" if overview else "focus agent's pane"),
         ("click, wheel", "select / move"),
-        ("Space", "fold or unfold"),
-        ("v", "view: auto, cards, graph, compact"),
+        ("Space", "fold / unfold"),
+        ("v", "cycle views"),
         ("i", "details box"),
         ("r", "refresh"),
         ("q", "close this map"),
-        ("?", "show / hide this help"),
+        ("?", "show / hide help"),
         ("", None),
         (f"HERDR KEYS (prefix = {prefix})", None),
-        ("prefix m", "maps in every agent tab of this space"),
-        ("prefix M", "all-spaces overview (this view)" if overview else "all-spaces overview"),
-        ("prefix z", "zoom this pane (wide graph)"),
+        ("prefix m", "maps in this space"),
+        ("prefix M", "all-spaces overview"),
+        ("prefix z", "zoom: wide graph"),
     ]
 
 
@@ -421,17 +420,30 @@ class App:
                               x0 - self.scroll_x, x1 - self.scroll_x, key))
 
     def draw_help(self, top, bottom, w):
+        """Key list; descriptions that do not fit beside a key wrap below it."""
         attr = self.styles
+        lines = help_lines(self.overview)
+        key_w = max(len(k) for k, t in lines if t) + 2
+        desc_x = 2 + key_w
         row = top
-        for key, text in help_lines(self.overview):
+        for key, text in lines:
             if row >= bottom:
                 break
             if text is None:
                 self.put(row, 1, key, attr["accent"] | curses.A_BOLD)
-            else:
-                self.put(row, 2, key, curses.A_BOLD)
-                self.put(row, 20, text[: max(0, w - 21)], attr["dim"])
+                row += 1
+                continue
+            self.put(row, 2, key, curses.A_BOLD)
+            if len(text) <= w - desc_x - 1:
+                self.put(row, desc_x, text, attr["dim"])
+                row += 1
+                continue
             row += 1
+            for part in wrap(text, max(8, w - 7), 2):
+                if row >= bottom:
+                    break
+                self.put(row, 6, part, attr["dim"])
+                row += 1
 
     def draw_details(self, y, rows, w):
         attr = self.styles
