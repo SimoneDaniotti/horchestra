@@ -300,7 +300,7 @@ class App:
         if footer:
             self.put(h - 2, 0, "─" * w, attr["dim"])
             self.put(h - 1, 0, "▌", attr["here"])
-            self.put(h - 1, 1, "this tab  v view  d info  ↵ focus", attr["dim"])
+            self.put(h - 1, 1, "this tab  wasd move  v view  i info", attr["dim"])
         self.screen.noutrefresh()
         curses.doupdate()
 
@@ -426,13 +426,13 @@ class App:
     def handle(self, key):
         if key == ord("q"):
             return False
-        if key in (curses.KEY_UP, ord("k")):
+        if key in (curses.KEY_UP, ord("w"), ord("k")):
             self.move(-1)
-        elif key in (curses.KEY_DOWN, ord("j")):
+        elif key in (curses.KEY_DOWN, ord("s"), ord("j")):
             self.move(1)
-        elif key in (curses.KEY_LEFT, ord("h")):
+        elif key in (curses.KEY_LEFT, ord("a"), ord("h")):
             self.to_parent()
-        elif key in (curses.KEY_RIGHT, ord("l")):
+        elif key in (curses.KEY_RIGHT, ord("d"), ord("l")):
             self.to_child()
         elif key in (curses.KEY_HOME, ord("g")):
             self.move(-len(self.order))
@@ -445,7 +445,7 @@ class App:
         elif key == ord("v"):
             self.mode = MODES[(MODES.index(self.mode) + 1) % len(MODES)]
             self.scroll_x = self.scroll_y = 0
-        elif key == ord("d"):
+        elif key == ord("i"):
             self.show_details = not self.show_details
         elif key == ord("r"):
             self.refresh()

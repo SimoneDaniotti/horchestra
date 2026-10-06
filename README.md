@@ -86,12 +86,12 @@ commands by hand.
 
 | Key / mouse | Action |
 | --- | --- |
-| `↑` `↓` / `j` `k` / wheel | move selection |
-| `←` `→` / `h` `l` | go to parent / first child |
+| `w` `s` / `↑` `↓` / `k` `j` / wheel | move selection up / down |
+| `a` `d` / `←` `→` / `h` `l` | go to parent / first child |
 | `Enter` / double-click | focus that agent's pane |
 | `Space` | fold or unfold a subtree |
 | `v` | cycle views: auto → cards → graph → compact |
-| `d` | show or hide the details box |
+| `i` | show or hide the details box (info) |
 | `r` / `q` | refresh / close this map |
 
 - **cards**: one card per agent: icon, status, and a detail line (a
