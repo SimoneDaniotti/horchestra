@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Tasks: `assign` gives a member a numbered task, `done` / `blocked` close it
+  and tell the orchestrator, `tasks` and `cancel` manage them. `hire --task`
+  records task #1. Stored in `.orchestra/tasks.json`, under a lock.
+- A Herdr event hook notes the orchestrator when a member goes idle with a
+  task still open. Restart and reopen notes list open tasks.
+- Onboarding interview: the orchestrator proposes, and the human picks, when
+  to call each member, how it receives work and when it reports back
+  (`hire --call-when/--handoff/--reporting`, `onboard`). The agreement and a
+  teammate roster go into the member's agent file; `status` lists them.
+
 ## 0.2.0 — 2026-10-06
 
 - Live edges: the edge into a working agent lights up and a pulse runs from

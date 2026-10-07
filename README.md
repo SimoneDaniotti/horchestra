@@ -295,6 +295,55 @@ skills, and deny rules. Use it after adopting an agent, after editing a
 ROLE.md, or with `--all` for the whole team. Wait until the member is idle
 (or pass `--force`). Claude only; it takes a few seconds per member.
 
+### Onboarding: when to call a member, how it gets work, when it reports
+
+Before hiring (or right after adopting) a member, the orchestrator runs a
+short interview with you. For that member it proposes two or three concrete
+options each for:
+
+- **call when**: which work goes to it ("UI or CSS changes under web/");
+- **handoff**: how it receives work ("one task at a time, under an hour each");
+- **reporting**: when it reports back beyond finishing ("a status line at
+  each milestone", "ask before deleting files").
+
+In Claude Code these appear as multiple-choice questions; you can always
+write your own answer. The answers become the member's working agreement:
+
+```bash
+horchestra-team hire fe --task "checkout page" \
+  --call-when "UI or CSS changes under web/" \
+  --handoff "one task at a time, under an hour each" \
+  --reporting "a status line at each milestone"
+horchestra-team onboard docs --call-when "anything user-facing changes"   # adopted or later
+```
+
+The agreement is saved in team.toml, written into the member's agent file
+(with a list of its teammates and when to call each), sent to the member if
+it is running, and listed by `horchestra-team status`, where the orchestrator
+routes work from.
+
+### Tasks
+
+Work goes out as numbered tasks and comes back closed:
+
+```bash
+horchestra-team assign fe "add a coupon field"     # orchestrator: records and sends task #2
+horchestra-team done 2 "coupon field added"        # member: closes it and tells the orchestrator
+horchestra-team blocked 2 "need the API keys"      # member: cannot finish
+horchestra-team tasks [--all]                      # open and blocked tasks (or every task)
+horchestra-team cancel 2 "postponed"               # orchestrator
+```
+
+`hire --task` records task #1 the same way. `done` and `blocked` message the
+orchestrator (`[horchestra] message from fe: task #2 done: …`) and update the
+member's line in the map, so nobody has to poll. If a member goes idle while
+it still has an open task (it never ran `done`), a Herdr event hook sends
+the orchestrator a note to check its output, at most once every 10 minutes
+per task. Restart and reopen notes list the tasks still open.
+
+Tasks live in `.orchestra/tasks.json` in the project, written under a lock so
+members finishing at the same time cannot lose an update.
+
 ### Status lines and "needs you"
 
 Members keep their own line in the map:
@@ -306,7 +355,8 @@ horchestra-team report --clear
 ```
 
 `report` only updates the map (and `status`); to tell the orchestrator
-something, a member runs `horchestra-team message orchestrator "…"`, which
+something other than a finished task, a member runs
+`horchestra-team message orchestrator "…"`, which
 arrives in the orchestrator's conversation as
 `[horchestra] message from <role>: …`. Hired and respawned members have both
 commands in their instructions; the orchestrator tells adopted ones.
