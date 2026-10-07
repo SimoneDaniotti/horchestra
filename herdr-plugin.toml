@@ -58,3 +58,9 @@ id = "zoom"
 title = "horchestra-zoom"
 placement = "overlay"
 command = ["python3", "zoom.py"]
+
+# A member that goes idle while it still has an open task (it never ran
+# `horchestra-team done`) gets the orchestrator a note to check on it.
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "team.py", "hook-status"]

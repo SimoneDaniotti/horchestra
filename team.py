@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 import herdr_client as hc  # noqa: E402
 import roles  # noqa: E402
+import tasks  # noqa: E402
 
 try:
     import tomllib
@@ -72,7 +73,14 @@ RESERVED_CLAUDE_FLAGS = frozenset({
     "--system-prompt-snapshot", "--name", "-n", "--append-system-prompt",
     "--append-system-prompt-file", "--system-prompt", "--system-prompt-file",
 })
-STRING_FIELDS = ("role", "kind", "task", "session", "cwd", "profile", "reports_to", "brief")
+STRING_FIELDS = ("role", "kind", "task", "session", "cwd", "profile", "reports_to", "brief",
+                 "call_when", "handoff", "reporting")
+# Onboarding agreements: (team.toml key, how the member's instructions phrase it).
+ONBOARDING = (
+    ("call_when", "The orchestrator brings you in for"),
+    ("handoff", "How you receive work"),
+    ("reporting", "When to report back"),
+)
 SKILL_FIELDS = ("uses_skills", "only_skills", "deny_skills")
 
 
@@ -597,19 +605,58 @@ def name_tabs(space, log=print):
 
 def team_context(space, role):
     """Standing member instructions (a Claude member's session agent holds them)."""
-    return (
+    entry = space.entry(role) or {}
+    text = (
         f"You are the {role} member of an agent team in this Herdr space, "
         f"coordinated by an orchestrator agent (Herdr agent "
         f"`{space.agent_name(ORCHESTRATOR)}`). Work only on your brief and do not "
         "edit team.toml. "
+    )
+    agreed = [f"{label}: {entry[key].rstrip('.')}." for key, label in ONBOARDING if entry.get(key)]
+    if agreed:
+        text += "\n\nAgreed when you were onboarded (follow these):\n" + "\n".join(
+            f"- {a}" for a in agreed) + "\n\n"
+    mates = roster(space, exclude=role)
+    if mates:
+        text += ("\n\nYour teammates when you joined (`horchestra-team status` shows the "
+                 "current team); message one with `horchestra-team message <role> \"...\"` "
+                 "when your work affects theirs:\n" + mates + "\n\n")
+    return (
+        text
+        + TASK_HOWTO
         + REPORT_HOWTO
         + "When you finish, end with a short summary of what you changed and "
         "anything the orchestrator must know."
     )
 
 
-def member_brief(member):
-    return "Your brief:\n\n" + (member.get("task") or "(wait for instructions from the orchestrator)")
+def roster(space, exclude=None):
+    """One line per team agent: role, kind, what it does, when to call it."""
+    lines = []
+    for m in space.team["member"]:
+        if exclude and m["role"].lower() == exclude.lower():
+            continue
+        kind = m.get("kind") or space.team.get("default_kind", "claude")
+        line = f"- {m['role']} ({kind}): {m.get('task') or 'no task recorded'}"
+        if m.get("call_when"):
+            line += f". Call when: {m['call_when'].rstrip('.')}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def member_brief(member, task=None):
+    text = "Your brief:\n\n" + (member.get("task") or "(wait for instructions from the orchestrator)")
+    if task:
+        text = (f"[horchestra] task #{task['id']} from the orchestrator. " + text
+                + f"\n\nWhen it is finished, run `horchestra-team done {task['id']} \"<one-line summary>\"`"
+                f" (or `horchestra-team blocked {task['id']} \"<why>\"`).")
+    return text
+
+
+def task_prompt(task):
+    return (f"[horchestra] task #{task['id']} from the orchestrator: {task['text']}\n\n"
+            f"When it is finished, run `horchestra-team done {task['id']} \"<one-line summary>\"`; "
+            f"if you cannot finish it, run `horchestra-team blocked {task['id']} \"<why>\"`.")
 
 
 def load_profile(space, member):
@@ -618,6 +665,14 @@ def load_profile(space, member):
     except roles.RoleError as exc:
         raise TeamError(str(exc)) from exc
 
+
+TASK_HOWTO = (
+    "Work arrives as numbered tasks (`[horchestra] task #N ...`). When task #N is "
+    "finished, run `horchestra-team done N \"<one-line summary>\"`; it tells the "
+    "orchestrator and updates the map, so there is no need to message it as well. "
+    "If you cannot finish it (missing access, a decision outside your role), run "
+    "`horchestra-team blocked N \"<why>\"` and stop. "
+)
 
 REPORT_HOWTO = (
     "Keep the human's agent map current: at each milestone run "
@@ -699,7 +754,7 @@ def record_started(space, role, pane):
     save(space.team_file, space.team)
 
 
-def spawn_member(space, team, member):
+def spawn_member(space, team, member, task=None):
     role = member["role"]
     cwd = os.path.join(space.root, member.get("cwd", "")) if member.get("cwd") else space.root
     pane = space.pane(role)
@@ -712,12 +767,12 @@ def spawn_member(space, team, member):
     profile = load_profile(space, member)
     args = member_args(space, member, profile)
     if kind == "claude":
-        brief = member_brief(member)
+        brief = member_brief(member, task)
         # Its team context and profile live in launch flags; restore re-applies them.
         member["profile_applied"] = True
     else:
         # Other agents get the same instructions in their first message.
-        brief = roles.agent_body(profile, team_context(space, role)) + "\n" + member_brief(member)
+        brief = roles.agent_body(profile, team_context(space, role)) + "\n" + member_brief(member, task)
     start_agent(space.agent_name(role), kind, pane_id, args)
     prompt(pane_id, brief)
     pane = wait_for_session(space, pane_id)
@@ -862,7 +917,7 @@ def adopt(space, role, pane, remind=False, log=print):
     return True
 
 
-def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief=False, log=print):
+def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief=False, log=print, briefs=None):
     team = space.team
     space.dirty = False
     orch = space.pane(ORCHESTRATOR)
@@ -891,7 +946,7 @@ def sync(space, near_pane=None, start_orch=False, spawn=True, only=None, rebrief
         pane = space.pane(role)
         if spawn and (only is None or role in only) and (pane is None or not pane.get("agent")):
             log(f"starting {role}…")
-            pane = spawn_member(space, team, member)
+            pane = spawn_member(space, team, member, (briefs or {}).get(role))
         if not pane:
             continue
         if space.label_only(role, pane):
@@ -1168,6 +1223,7 @@ def finish_restore(space, live, st, log=print):
                 failed.append(member["role"])
     if reapplied:
         note += f"Role profiles were re-applied to: {', '.join(reapplied)}. "
+    note += open_tasks_note(space)
     if failed:
         note += (f"Could not re-apply role profiles to: {', '.join(failed)} (they run "
                  "without their role instructions and skill rules; try "
@@ -1203,6 +1259,14 @@ def finish_restore(space, live, st, log=print):
             log(f"not re-briefing the orchestrator: {problem}")
     replace_dead_maps(space, log=log)
     log("restored" + (f" (not resumed: {', '.join(missing)})" if missing else ""))
+
+
+def open_tasks_note(space):
+    try:
+        lines = open_task_lines(space)
+    except TeamError:
+        return ""
+    return f"Tasks still open: {'; '.join(lines)}. " if lines else ""
 
 
 def team_tabs(space):
@@ -1569,6 +1633,7 @@ def cmd_reopen(args):
             note += f"Started fresh (no saved conversation): {', '.join(fresh)}. "
         if failed:
             note += f"Could not start: {', '.join(failed)}. "
+        note += open_tasks_note(space)
         note += "Run `horchestra-team status` before continuing."
         deliver(orch["pane_id"], note)
     print(f"done: resumed {len(resumed)}, fresh {len(fresh)}, failed {len(failed)}")
@@ -1615,6 +1680,9 @@ def cmd_hire(args):
         member["deny_skills"] = args.deny_skill
     if args.only_skill:
         member["only_skills"] = args.only_skill
+    for key, _ in ONBOARDING:
+        if getattr(args, key, None):
+            member[key] = getattr(args, key)
     validate_entry(team, member, space.root, f"hire {args.role}")
     load_profile(space, member)  # fail before touching team.toml
     if member["kind"] == "claude":
@@ -1626,12 +1694,14 @@ def cmd_hire(args):
     existing = (space.pane(args.role) or {}).get("pane_id")
     team["member"].append(member)
     save(space.team_file, team)
+    task = tasks.add(space.root, args.role, args.task)
     try:
-        sync(space, only={args.role})
+        sync(space, only={args.role}, briefs={args.role: task})
     except (TeamError, hc.HerdrError) as exc:
         kept = hire_left_behind(space, args.role, existing)
         if kept is None:
-            # Nothing was created: undo the team.toml change.
+            # Nothing was created: undo the team.toml change and the task.
+            tasks.close(space.root, task["id"], "cancelled", "hire failed")
             tmp = space.team_file + ".tmp"
             with open(tmp, "w") as fh:
                 fh.write(before)
@@ -1643,7 +1713,8 @@ def cmd_hire(args):
             "`horchestra-team sync`") from exc
     show_maps(space)
     pane = space.pane(args.role)
-    print(f"hired {args.role}: agent {space.agent_name(args.role)} in pane {pane['pane_id'] if pane else '?'}")
+    print(f"hired {args.role}: agent {space.agent_name(args.role)} in pane {pane['pane_id'] if pane else '?'}"
+          f" (task #{task['id']})")
 
 
 def hire_left_behind(space, role, existing):
@@ -1682,6 +1753,199 @@ def cmd_fire(args):
     print(f"fired {role}")
 
 
+# ---- tasks --------------------------------------------------------------
+
+
+def load_tasks(space):
+    try:
+        return tasks.load(space.root)
+    except tasks.TaskError as exc:
+        raise TeamError(str(exc)) from exc
+
+
+def open_task_lines(space):
+    board = load_tasks(space)
+    return [tasks.line(t) + ("" if t["state"] == "open" else f" [{t['state']}]")
+            for t in board["tasks"] if t.get("state") in tasks.ACTIVE]
+
+
+def caller_role(space, me):
+    """The team role of the calling pane, or None (e.g. the human's shell)."""
+    role = tokens_of(me).get(hc.TOKEN_ROLE)
+    if not role or not me.get("pane_id"):
+        return None
+    pane = space.pane(role)
+    return role if pane and pane.get("pane_id") == me["pane_id"] else None
+
+
+def cmd_assign(args):
+    """Give a member a numbered task and send it to them."""
+    space, me = resolve_space(args.file)
+    role = next((m["role"] for m in space.team["member"] if m["role"].lower() == args.role.lower()), None)
+    if role is None:
+        raise TeamError(f"{args.role} is not a member (see `horchestra-team status`)")
+    target = space.pane(role)
+    if not target or not target.get("agent"):
+        raise TeamError(f"{role} has no running agent (`horchestra-team sync` starts it)")
+    task = tasks.add(space.root, role, " ".join(args.text))
+    try:
+        prompt(target["pane_id"], task_prompt(task))
+    except hc.HerdrError as exc:
+        tasks.close(space.root, task["id"], "cancelled", f"not delivered: {exc}")
+        raise TeamError(f"could not send task #{task['id']} to {role} (cancelled it): {exc}") from exc
+    if me.get("pane_id"):
+        try:
+            hc.set_tokens(me["pane_id"], {hc.TOKEN_SIGNAL: hc.signal_value("msg", target["pane_id"])})
+        except hc.HerdrError:
+            pass
+    print(f"task #{task['id']} assigned to {role}")
+
+
+def parse_task_args(words):
+    """`[ID] text...` -> (id or None, text)."""
+    if words and words[0].lstrip("#").isdigit():
+        return int(words[0].lstrip("#")), " ".join(words[1:])
+    return None, " ".join(words)
+
+
+def cmd_finish(args):
+    """`done` / `blocked`: close a task and tell the orchestrator."""
+    state = args.command
+    space, me = resolve_space(args.file)
+    task_id, text = parse_task_args(args.text)
+    text = " ".join(text.split())
+    if not text:
+        raise TeamError(f"give a one-line {'summary' if state == 'done' else 'reason'}")
+    role = caller_role(space, me)
+    board = load_tasks(space)
+    if task_id is None:
+        if role is None or role == ORCHESTRATOR:
+            raise TeamError("give the task number, e.g. `horchestra-team done 3 \"...\"`")
+        mine = tasks.open_for(board, role)
+        if not mine:
+            raise TeamError("you have no open task; tell the orchestrator with "
+                            "`horchestra-team message orchestrator \"...\"`")
+        if len(mine) > 1:
+            listed = ", ".join(f"#{t['id']}" for t in mine)
+            raise TeamError(f"you have several open tasks ({listed}); give the task number")
+        task_id = mine[0]["id"]
+    task = tasks.find(board, task_id)
+    if task is None:
+        raise TeamError(f"no task #{task_id} (see `horchestra-team tasks`)")
+    if role != ORCHESTRATOR and (role or "").lower() != task["role"].lower():
+        raise TeamError(f"task #{task_id} belongs to {task['role']}")
+    if task["state"] not in tasks.ACTIVE:
+        raise TeamError(f"task #{task_id} is already {task['state']}")
+    task = tasks.close(space.root, task_id, state, text)
+    owner = space.pane(task["role"])
+    if role and role != ORCHESTRATOR and owner:
+        line = f"{state}: {text}"[:80]
+        hc.set_tokens(owner["pane_id"], {hc.TOKEN_STATUS: line, hc.TOKEN_SIGNAL: hc.signal_value(
+            "report" if state == "done" else "needs")}, clear=[hc.TOKEN_NEEDS])
+        orch = space.pane(ORCHESTRATOR)
+        if orch and orch.get("agent"):
+            prompt(orch["pane_id"], f"[horchestra] message from {role}: task #{task_id} {state}: {text}")
+    print(f"task #{task_id} {state}")
+
+
+def cmd_cancel(args):
+    """Drop a task without it being done (orchestrator)."""
+    space, _ = resolve_space(args.file)
+    board = load_tasks(space)
+    task = tasks.find(board, args.id)
+    if task is None:
+        raise TeamError(f"no task #{args.id}")
+    if task["state"] not in tasks.ACTIVE:
+        raise TeamError(f"task #{args.id} is already {task['state']}")
+    tasks.close(space.root, args.id, "cancelled", " ".join(args.reason))
+    print(f"task #{args.id} cancelled")
+
+
+def cmd_tasks(args):
+    """List tasks (open and blocked; --all for every task)."""
+    space, _ = resolve_space(args.file, read_only=True)
+    board = load_tasks(space)
+    shown = [t for t in board["tasks"] if args.all or t.get("state") in tasks.ACTIVE]
+    if args.role:
+        shown = [t for t in shown if t.get("role", "").lower() == args.role.lower()]
+    if not shown:
+        print("no open tasks" if not args.all else "no tasks yet")
+        return
+    for t in shown:
+        extra = f"  -> {t['summary']}" if t.get("summary") else ""
+        print(f"#{t['id']:<4}{t.get('role', '?'):<14}{t.get('state', '?'):<10}{t.get('text', '')}{extra}")
+
+
+# ---- idle-with-open-task notice (Herdr event hook) ----------------------
+
+NUDGE_GRACE = 3.0  # seconds for a `done` run at the end of the turn to land
+NUDGE_EVERY = 600  # at most one notice per task per this many seconds
+IDLE_STATES = ("idle", "done")
+
+
+def event_pane_status(raw):
+    """(pane_id, agent_status) from HERDR_PLUGIN_EVENT_JSON, or (None, None)."""
+    try:
+        doc = json.loads(raw or "{}")
+    except ValueError:
+        return None, None
+    for part in (doc.get("data") if isinstance(doc, dict) else None, doc):
+        if isinstance(part, dict) and isinstance(part.get("pane_id"), str):
+            status = part.get("agent_status")
+            return part["pane_id"], status if isinstance(status, str) else None
+    return None, None
+
+
+def team_of_pane(pane):
+    """(Space, role) when `pane` is a registered team's member, else (None, None)."""
+    role = tokens_of(pane).get(hc.TOKEN_ROLE)
+    if not role or role == ORCHESTRATOR or not pane.get("workspace_id"):
+        return None, None
+    path = find_team_file(pane.get("foreground_cwd") or pane.get("cwd") or "")
+    if not path or os.path.abspath(path) not in registered():
+        return None, None
+    space = Space(pane["workspace_id"], os.path.abspath(path), load(path))
+    if not space.entry(role):
+        return None, None
+    mine = space.pane(role)
+    if not mine or mine.get("pane_id") != pane.get("pane_id"):
+        return None, None
+    return space, role
+
+
+def cmd_hook_status(_args):
+    """Event hook: a member went idle while it still has an open task."""
+    pane_id, status = event_pane_status(os.environ.get("HERDR_PLUGIN_EVENT_JSON"))
+    if not pane_id or status not in IDLE_STATES:
+        return
+    pane = hc.call_quiet("pane", "get", pane_id)
+    pane = (pane or {}).get("pane") or {}
+    space, role = team_of_pane(pane)
+    if not space:
+        return
+    time.sleep(NUDGE_GRACE)
+    pane = (hc.call_quiet("pane", "get", pane_id) or {}).get("pane") or {}
+    if pane.get("agent_status") not in IDLE_STATES or tokens_of(pane).get(hc.TOKEN_NEEDS):
+        return  # back at work, or waiting on the human (who was already notified)
+    stale = [t for t in tasks.open_for(load_tasks(space), role)
+             if time.time() - (t.get("nudged") or 0) >= NUDGE_EVERY]
+    orch = space.pane(ORCHESTRATOR)
+    if not stale or not orch or not orch.get("agent"):
+        return
+    listed = "; ".join(f"#{t['id']} \"{t['text'][:80]}\"" for t in stale)
+    first = stale[0]["id"]
+    note = (f"[horchestra] {role} went idle with open task(s): {listed}. Read its output "
+            f"(`herdr agent read {space.agent_name(role)} --lines 80`), then close the task with "
+            f"`horchestra-team done {first} \"<summary>\"` (or `blocked {first} \"<why>\"`), or "
+            f"message {role} if it is not finished.")
+    try:
+        prompt(orch["pane_id"], note)
+    except hc.HerdrError as exc:
+        raise TeamError(f"could not tell the orchestrator that {role} went idle: {exc}") from exc
+    tasks.mark_nudged(space.root, {t["id"] for t in stale}, time.time())
+    print(f"told the orchestrator: {role} idle with {', '.join('#' + str(t['id']) for t in stale)} open")
+
+
 def cmd_status(args):
     space, _ = resolve_space(args.file)
     team = space.team
@@ -1689,6 +1953,7 @@ def cmd_status(args):
     rows = [(ORCHESTRATOR, team["orchestrator"].get("kind", "claude"), "")]
     rows += [(m["role"], m.get("kind") or team.get("default_kind", "claude"), m.get("reports_to", "")) for m in team["member"]]
     print(f"team file: {space.team_file}")
+    board = load_tasks(space)
     name_w = max([26] + [len(space.agent_name(r)) + 2 for r, _, _ in rows])
     print(f"{'ROLE':<14}{'KIND':<9}{'AGENT':<{name_w}}{'PANE':<9}{'STATE':<9}{'REPORTS TO':<12}PROFILE / REPORTED")
     for role, kind, boss in rows:
@@ -1702,6 +1967,45 @@ def cmd_status(args):
         if reported:
             flag = "NEEDS YOU: " if tokens_of(pane).get(hc.TOKEN_NEEDS) else ""
             print(f"{'':<14}↳ reported: {flag}{reported}")
+        for key, _ in ONBOARDING:
+            if member and member.get(key):
+                print(f"{'':<14}↳ {key.replace('_', ' ')}: {member[key]}")
+        for task in tasks.open_for(board, role, tasks.ACTIVE):
+            print(f"{'':<14}↳ task #{task['id']} {task['state']}: {task['text']}"
+                  + (f" ({task['summary']})" if task.get("summary") else ""))
+
+
+def add_onboarding_flags(parser):
+    parser.add_argument("--call-when", dest="call_when", help="when the orchestrator should bring this member in")
+    parser.add_argument("--handoff", help="how the member receives work (task size, batching, review)")
+    parser.add_argument("--reporting", help="when the member reports back (milestones, done only, ...)")
+
+
+def cmd_onboard(args):
+    """Record onboarding agreements for a member and tell it (orchestrator)."""
+    space, _ = resolve_space(args.file)
+    entry = next((m for m in space.team["member"] if m["role"].lower() == args.role.lower()), None)
+    if entry is None:
+        raise TeamError(f"{args.role} is not a member (hire or adopt it first)")
+    changes = {key: getattr(args, key) for key, _ in ONBOARDING if getattr(args, key, None)}
+    if not changes:
+        agreed = [f"{label}: {entry[key]}" for key, label in ONBOARDING if entry.get(key)]
+        print("\n".join(agreed) or f"no onboarding agreements for {entry['role']} yet")
+        return
+    entry.update(changes)
+    validate_entry(space.team, entry, space.root, f"onboard {entry['role']}")
+    save(space.team_file, space.team)
+    role = entry["role"]
+    kind = entry.get("kind") or space.team.get("default_kind", "claude")
+    if kind == "claude":
+        # Rewrite its agent file now, so a respawn or restart starts from it.
+        member_args(space, entry, load_profile(space, entry))
+    pane = space.pane(role)
+    if pane and pane.get("agent"):
+        lines = [f"- {label}: {entry[key]}" for key, label in ONBOARDING if entry.get(key)]
+        prompt(pane["pane_id"], "[horchestra] Working agreement with the orchestrator, effective now:\n"
+               + "\n".join(lines))
+    print(f"onboarded {role}: " + ", ".join(sorted(changes)))
 
 
 def main(argv=None):
@@ -1752,7 +2056,32 @@ def main(argv=None):
     hire.add_argument("--deny-skill", action="append", help="skill name or pattern to block (repeatable)")
     hire.add_argument("--only-skill", action="append",
                       help="allowlist: the member may use only these skills (repeatable)")
+    add_onboarding_flags(hire)
     hire.set_defaults(func=cmd_hire)
+
+    onboard = sub.add_parser("onboard", help="record when to call a member, how it gets work and reports back")
+    onboard.add_argument("role")
+    add_onboarding_flags(onboard)
+    onboard.set_defaults(func=cmd_onboard)
+
+    assign = sub.add_parser("assign", help="give a member a numbered task (orchestrator)")
+    assign.add_argument("role")
+    assign.add_argument("text", nargs="+")
+    assign.set_defaults(func=cmd_assign)
+    for name, what in (("done", "a one-line summary"), ("blocked", "why it cannot be finished")):
+        finish = sub.add_parser(name, help=f"close your task as {name}: [ID] {what} (members)")
+        finish.add_argument("text", nargs="+", help=f"[task id] {what}")
+        finish.set_defaults(func=cmd_finish)
+    cancel = sub.add_parser("cancel", help="cancel a task (orchestrator)")
+    cancel.add_argument("id", type=int)
+    cancel.add_argument("reason", nargs="*")
+    cancel.set_defaults(func=cmd_cancel)
+    tasks_p = sub.add_parser("tasks", help="list open and blocked tasks")
+    tasks_p.add_argument("--all", action="store_true", help="include done and cancelled tasks")
+    tasks_p.add_argument("--role")
+    tasks_p.set_defaults(func=cmd_tasks)
+    sub.add_parser("hook-status", help="event hook: notice members idle with open tasks").set_defaults(
+        func=cmd_hook_status)
 
     adopt_p = sub.add_parser("adopt", help="add an already running agent to the team (no restart)")
     adopt_p.add_argument("pane", help="pane id of the running agent, e.g. w7:p6")
@@ -1768,7 +2097,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         args.func(args)
-    except (TeamError, roles.RoleError, hc.HerdrError) as exc:
+    except (TeamError, roles.RoleError, tasks.TaskError, hc.HerdrError) as exc:
         print(f"horchestra-team: {exc}", file=sys.stderr)
         return 1
     return 0
