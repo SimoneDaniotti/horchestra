@@ -12,6 +12,28 @@
   (`hire --call-when/--handoff/--reporting`, `onboard`). The agreement and a
   teammate roster go into the member's agent file; `status` lists them.
 
+Fixed:
+
+- A restart could leave the orchestrator stopped: restore restarted it to
+  refresh its instructions while Herdr was still resuming it, and Herdr kept
+  its name on the empty pane, so starting it again failed. Restore now waits
+  for the team to settle first, and `respawn` moves an agent whose name is
+  stuck to a fresh pane instead of leaving it stopped.
+- Re-applying member profiles after a restart failed with `pane_not_found`
+  when Herdr was still restoring panes; it is now retried.
+- Agent names are recorded in team.toml and reused, so a restart no longer
+  renames some agents to the hashed form.
+- After a restart, agents Herdr did not resume (it had lost their session
+  references) were left as empty shells and the orchestrator was started
+  blank. Restore now resumes them from the conversations in team.toml, in
+  their own idle panes, never twice; a fresh orchestrator is started only
+  when no conversation is saved.
+- A starting agent waiting on a question (such as Claude's folder trust) now
+  raises a Herdr notification naming the folder and pane.
+- Moved projects: the team registry stores real paths and follows symlinked
+  entries to the new folder. The idle-task notice ignored teams registered
+  through a symlink; it now finds them.
+
 ## 0.2.0 — 2026-10-06
 
 - Live edges: the edge into a working agent lights up and a pulse runs from

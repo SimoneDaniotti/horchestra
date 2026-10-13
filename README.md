@@ -379,8 +379,13 @@ integrations are current. The plugin's startup hook then:
   and map links
 - sends a resumed orchestrator a short note listing who came back (not after
   a live handoff, where nothing restarted)
-- starts a fresh orchestrator in its pane if its conversation could not be
-  resumed
+- resumes, from the conversations recorded in team.toml, any agent Herdr did
+  not bring back (Herdr only resumes sessions its integration still knew
+  about), with its role profile; this includes a team Herdr resumed nothing
+  of, as long as its labelled panes are there. An agent is resumed only into
+  its own `team:<role>` pane holding nothing but an idle shell, only if its
+  conversation file exists, and never if another pane already runs it
+- starts a fresh orchestrator only when it has no saved conversation
 - closes and reopens map and overview panes, which come back as idle shells,
   only when they keep their `horchestra-map` / `horchestra-overview` title,
   run no agent, and have only an idle shell in the foreground (checked with
@@ -390,6 +395,15 @@ integrations are current. The plugin's startup hook then:
   `claude --resume` would bring back the instructions recorded when the
   conversation began; the orchestrator is refreshed from the current
   `orchestrator.md` the same way
+
+Restore waits until the team's panes and agent states have stopped changing
+for about 12 seconds before it restarts anyone: right after startup Herdr is
+still finishing its own resumes, and restarting an agent then can leave its
+name stuck on an empty pane. If that happens anyway (on restore or a manual
+`respawn`), the agent is started in a fresh pane in the same tab and the
+empty pane is closed, so no role is left without its agent; a pane id that
+goes stale during startup is retried. Each agent's name is recorded in
+team.toml (`agent_name`) and reused, so names stay the same across restarts.
 
 Restore repairs each team on its own: one broken team.toml, or a pane that
 disappears mid-way, does not stop the other teams; a failing team is retried
@@ -404,8 +418,16 @@ label alone; two panes with the same `team:R` label are reported as ambiguous.
 a recorded session is replaced only by an agent Horchestra started, an
 explicit `adopt`/`init`, or a new conversation in the role's own terminal.
 
-Members whose conversation did not resume are reported to the orchestrator,
-never restarted automatically, so nothing runs twice. Results are in
+Members whose conversation cannot be resumed (no saved conversation, no
+pane, or a pane running something else) are reported to the orchestrator and
+never started fresh. When a starting agent stops at a question, typically
+Claude asking to trust a folder it has not seen, Horchestra never answers it:
+it sends a Herdr notification naming the folder and pane, and waits.
+
+Moved projects: the registry keeps real paths, so a team reached through a
+symlink (for example `~/Desktop/proj` after moving it to `~/Projects/proj`)
+is followed to its new folder on the next start. Claude Code then asks once
+whether to trust the new folder. Results are in
 `herdr plugin log list --plugin horchestra`.
 
 ### Closing and reopening a space
