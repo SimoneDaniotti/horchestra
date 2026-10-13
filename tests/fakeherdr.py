@@ -55,6 +55,7 @@ import herdr_client as hc
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 TOKEN_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+ANSI_RE = re.compile(r"\x1b\[[0-9;:?]*[A-Za-z]")
 MAX_TOKENS_PER_REQUEST = 16
 MAX_TOKENS_PER_PANE = 32
 MAX_TOKEN_VALUE = 80
@@ -655,7 +656,11 @@ class FakeHerdr:
         if pane is None:
             raise FakeError("pane_not_found", "pane not found")
         lines = int(a.opt("--lines", "40"))
-        return "\n".join(pane["screen"].splitlines()[-lines:])
+        screen = pane["screen"]
+        if a.opt("--format") != "ansi" or a.opt("--source") == "detection":
+            # Real Herdr (src/app/api_helpers.rs): detection is plain text even with --format ansi.
+            screen = ANSI_RE.sub("", screen)
+        return "\n".join(screen.splitlines()[-lines:])
 
     # ---- agent -----------------------------------------------------------
 

@@ -26,6 +26,8 @@ def claude_screen(box, history=()):
 
 EMPTY = claude_screen(["❯\xa0"])
 PLACEHOLDER = claude_screen(["❯\xa0" + RESET + DIM + 'Try "how does <filepath> work?"' + RESET])
+# Claude Code 2.1.289's suggestion for an idle agent, as `pane read --format ansi` gives it.
+SUGGESTION = claude_screen(["❯\xa0\x1b[0m\x1b[2mcommit this with commit_custom\x1b[0m\r"])
 DRAFT = claude_screen(["❯\xa0half a thought"])
 
 
@@ -35,6 +37,9 @@ class DraftTest(unittest.TestCase):
 
     def test_the_dim_placeholder_is_not_a_draft(self):
         self.assertEqual(outbox.draft_in(PLACEHOLDER), "")
+
+    def test_claude_s_dim_suggestion_is_not_a_draft(self):
+        self.assertEqual(outbox.draft_in(SUGGESTION), "")
 
     def test_typed_text_is_a_draft(self):
         self.assertEqual(outbox.draft_in(DRAFT), "half a thought")
@@ -258,6 +263,15 @@ class ReportWhileTypingJourneyTest(JourneyCase):
                        log=lambda _msg: None)
         self.assertEqual(self.herdr.prompts_to(self.orch)[-1],
                          "[horchestra] message from fe: task #2 done: the form is built")
+
+    def test_a_suggestion_in_an_idle_members_box_does_not_hold_messages(self):
+        self.init_team()
+        fe = self.hire("fe", "frontend")
+        self.herdr.set_screen(fe, SUGGESTION)
+        out = self.ok("message", "fe", "please add tests")
+        self.assertNotIn("queued", out)
+        self.assertEqual(self.herdr.prompts_to(fe)[-1], "[horchestra] message from orchestrator: please add tests")
+        self.assertEqual(self.couriers, [])
 
     def test_a_message_to_a_member_being_typed_to_says_it_is_queued(self):
         self.init_team()

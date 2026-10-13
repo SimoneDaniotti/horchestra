@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import herdr_client as hc  # noqa: E402
 
 PROMPT_GLYPHS = ("❯", "›")  # Claude Code, Codex
+BOX_LINES = 40  # bottom lines read to find the input box
 CHECK_EVERY = 2.0  # seconds between looks at the input box
 EMPTY_CHECKS = 2  # consecutive empty looks before sending
 GAP_SECONDS = 1.0  # between two queued messages to the same agent
@@ -103,8 +104,13 @@ def draft_in(screen):
 
 
 def read_box(pane_id):
-    """The pane's bottom screen with styling ('' when it cannot be read)."""
-    return hc.read_text(pane_id, source="detection", fmt="ansi")
+    """The pane's bottom screen with styling ('' when it cannot be read).
+
+    `recent` is the tail of the buffer, whatever the human scrolled to.
+    Not `detection`: Herdr returns it as plain text even with --format ansi,
+    and without the dim styling a suggestion looks like a draft.
+    """
+    return hc.read_text(pane_id, lines=BOX_LINES, source="recent", fmt="ansi")
 
 
 def has_draft(pane_id):
