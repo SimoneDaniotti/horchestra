@@ -361,6 +361,11 @@ arrives in the orchestrator's conversation as
 `[horchestra] message from <role>: …`. Hired and respawned members have both
 commands in their instructions; the orchestrator tells adopted ones.
 
+Messages, tasks and reports never land in the middle of something you are
+typing. If an agent's input box holds your draft, the message waits and goes
+in right after you send (or clear) it. The sender sees `queued: …`, and a
+courier log is in `~/.local/state/horchestra/outbox.log`.
+
 A needs-you report shows `!` until the agent works again and sends a Herdr
 notification. Herdr's own "agent finished / needs input" alerts cover
 the rest. Both follow `[ui.toast]` in Herdr's config, which is off by default:
@@ -488,7 +493,9 @@ projects and the state directory are left in place.
 ## How it works
 
 - Uses only Herdr's public surfaces: the `herdr` CLI and the documented event
-  socket. No private TUI protocol, no screen scraping for state.
+  socket. No private TUI protocol, no screen scraping for state. The screen
+  is read only to see whether you are typing into an agent's input box or a
+  trust prompt is waiting.
 - Events only trigger a fresh read, and unknown fields are ignored, so new
   Herdr releases can add fields or events without breaking it.
 - The map reconnects with backoff after server restarts and updates, and
