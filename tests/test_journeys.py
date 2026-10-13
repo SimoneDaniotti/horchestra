@@ -7,6 +7,7 @@ names, tokens, launches, prompts), files on disk, and team.toml.
 
 import contextlib
 import io
+import glob
 import json
 import os
 import re
@@ -441,23 +442,152 @@ class RestartJourneyTest(JourneyCase):
         self.assertEqual({m["tab_id"] for m in self.herdr.map_panes(self.ws)}, team_tabs)
         self.assertEqual(len(self.herdr.map_panes(self.ws)), 3)
 
-    def test_restart_reports_a_member_that_did_not_resume_instead_of_starting_it(self):
+    def test_restart_resumes_a_member_herdr_did_not_from_team_toml(self):
         fe, be = self.build_team()
+        session = self.member("be")["session"]
+        self.herdr.simulate_restart(not_resumed=[be])
+
+        log = self.restore()
+        self.assertIn("Herdr did not resume be; resuming its conversation", log)
+        p = self.herdr.pane(be)
+        self.assertEqual((p["agent"], p["agent_session"]["value"]), ("claude", session), "same conversation")
+        args = self.herdr.launches_of(be)[-1]["args"]
+        self.assertEqual(args[:4], ["--resume", session, "--system-prompt-snapshot", "off"])
+        self.assertEqual(arg_after(args, "--agent"), "horchestra-be", "with its profile")
+        self.assertEqual(len(self.herdr.launches_of(be)), 2, "hire, then this resume: never twice")
+        notes = [t for t in self.herdr.prompts_to(self.orch) if t.startswith("[horchestra] Herdr restarted")]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Resumed from team.toml (Herdr had not): be", notes[0])
+        self.assertNotIn("did not resume", notes[0])
+
+    def test_a_member_whose_conversation_is_gone_is_reported_not_started(self):
+        fe, be = self.build_team()
+        session = self.member("be")["session"]
+        for path in glob.glob(os.path.join(self.claude, "projects", "*", session + ".jsonl")):
+            os.remove(path)
         self.herdr.simulate_restart(not_resumed=[be])
 
         log = self.restore()
         self.assertIn("not resumed: be", log)
-        p = self.herdr.pane(be)
-        self.assertIsNone(p["agent"], "restore never starts a member")
-        self.assertEqual(p["label"], "team:be")
-        self.assertEqual(len(self.herdr.launches_of(be)), 1, "only the original hire launched it")
+        self.assertIsNone(self.herdr.pane(be)["agent"], "nothing to resume: never a fresh member")
+        self.assertEqual(len(self.herdr.launches_of(be)), 1)
+        notes = [t for t in self.herdr.prompts_to(self.orch) if t.startswith("[horchestra] Herdr restarted")]
+        self.assertIn("did not resume", notes[0])
+        self.assertEqual(self.member("be")["session"], session, "kept for reopen")
+
+
+class ResumeFromRecordTest(JourneyCase):
+    """After a restart in which Herdr resumed little or nothing of a team."""
+
+    def starts_in(self, pane_id, since=None):
+        """`agent start` calls aimed at `pane_id` after call number `since` (default: the restart)."""
+        calls = self.herdr.calls[self.restarted_at if since is None else since:]
+        return [c for c in calls if list(c[:2]) == ["agent", "start"] and pane_id in c]
+
+    def restore(self):
+        self.restarted_at = len(self.herdr.calls)
+        return super().restore()
+
+    def build_team(self):
+        self.make_profile("fe")
+        self.init_team()
+        return self.hire("fe", "frontend"), self.hire("be", "backend")
+
+    def test_a_team_herdr_resumed_nothing_of_comes_back_whole_with_its_conversations(self):
+        fe, be = self.build_team()
+        sessions = {pid: self.herdr.pane(pid)["agent_session"]["value"] for pid in (self.orch, fe, be)}
+        self.herdr.simulate_restart(resume=False)
+        log = self.restore()
+        for pid, session in sessions.items():
+            p = self.herdr.pane(pid)
+            self.assertEqual((p["agent"], p["agent_session"]["value"]), ("claude", session), pid)
+        orch_args = self.herdr.launches_of(self.orch)[-1]["args"]
+        self.assertEqual(orch_args[:2], ["--resume", sessions[self.orch]], "not a blank orchestrator")
+        self.assertNotIn("starting a fresh one", log)
         notes = [t for t in self.herdr.prompts_to(self.orch) if t.startswith("[horchestra] Herdr restarted")]
         self.assertEqual(len(notes), 1)
-        self.assertIn("did not resume", notes[0])
-        self.assertIn("be", notes[0].split("did not resume")[1].split(".")[0])
-        self.assertIsNotNone(self.herdr.agent_name_of(fe), "the resumed member is repaired")
-        self.assertEqual(self.member("be")["session"], self.herdr.launches_of(be)[0]["session"],
-                         "the unresumed member's session stays recorded for reopen")
+        self.assertIn("Resumed from team.toml (Herdr had not): orchestrator, fe, be", notes[0])
+        self.assertEqual(len(self.herdr.map_panes(self.ws)), 3, "maps come back too")
+
+    def test_an_orchestrator_without_a_saved_conversation_starts_fresh(self):
+        self.build_team()
+        session = self.team_data()["orchestrator"]["session"]
+        for path in glob.glob(os.path.join(self.claude, "projects", "*", session + ".jsonl")):
+            os.remove(path)
+        self.herdr.simulate_restart(not_resumed=[self.orch])
+        log = self.restore()
+        self.assertIn("no saved conversation); starting a fresh one", log)
+        self.assertNotIn("--resume", self.herdr.launches_of(self.orch)[-1]["args"])
+
+    def test_a_conversation_already_running_elsewhere_is_not_started_again(self):
+        fe, be = self.build_team()
+        session = self.member("be")["session"]
+        self.herdr.simulate_restart(not_resumed=[be])
+        elsewhere = self.herdr.add_workspace("copy", self.home)  # e.g. resumed by hand in another space
+        self.herdr.add_agent(self.herdr.root_pane(elsewhere), session=session)
+        self.restore()
+        self.assertIsNone(self.herdr.pane(be)["agent"])
+        self.assertEqual(self.starts_in(be), [], "never a second copy of the conversation")
+
+    def test_a_busy_pane_is_never_used(self):
+        fe, be = self.build_team()
+        self.herdr.simulate_restart(not_resumed=[be])
+        self.herdr.panes[be]["process"] = "vim"
+        log = self.restore()
+        self.assertIn("not resumed: be", log)
+        self.assertIsNone(self.herdr.pane(be)["agent"])
+        self.assertEqual(self.starts_in(be), [], "nothing is typed into a pane running something else")
+
+    def test_a_trust_question_is_announced_with_the_folder(self):
+        fe, be = self.build_team()
+        self.herdr.simulate_restart(not_resumed=[be])
+        self.herdr.set_screen(be, "Quick safety check: Is this a project you created or one you trust?\n"
+                                  "  1. Yes, I trust this folder\n  2. No, exit")
+        self.herdr.inject_error(("agent", "start"), "agent_not_ready", "waiting on the user")
+        self.restore()
+        asks = [n for n in self.herdr.notifications if n["title"] == "Horchestra: your answer is needed"]
+        self.assertEqual(len(asks), 1)
+        self.assertIn(f"Claude asks whether to trust {self.project}: answer in pane {be}", asks[0]["body"])
+
+
+class MovedProjectTest(JourneyCase):
+    def test_a_team_registered_through_a_symlink_is_followed_to_its_real_folder(self):
+        self.init_team()
+        fe = self.hire("fe", "frontend")
+        link = os.path.join(self.tmp, "old-place")
+        os.symlink(self.project, link)
+        linked = os.path.join(link, "team.toml")
+        with open(os.path.join(self.state, "teams.json"), "w") as fh:
+            json.dump([linked], fh)
+        with open(os.path.join(self.state, "terminals.json"), "w") as fh:
+            json.dump({linked: {"orchestrator": "term-old"}}, fh)
+
+        log = self.restore()
+        self.assertIn("the project moved here from", log)
+        self.assertIn("Claude Code will ask once whether to trust", log)
+        self.assertEqual(self.registry(), [self.team_file])
+        with open(os.path.join(self.state, "terminals.json")) as fh:
+            self.assertIn(self.team_file, json.load(fh))
+
+    def test_the_idle_task_notice_works_for_a_team_registered_through_a_symlink(self):
+        self.init_team()
+        fe = self.hire("fe", "frontend")
+        link = os.path.join(self.tmp, "old-place")
+        os.symlink(self.project, link)
+        with open(os.path.join(self.state, "teams.json"), "w") as fh:
+            json.dump([os.path.join(link, "team.toml")], fh)
+        event = {"data": {"pane_id": fe, "agent_status": "idle"}}
+        with mock.patch.dict(os.environ, {"HERDR_PLUGIN_EVENT_JSON": json.dumps(event)}):
+            self.ok("hook-status", pane=fe)
+        self.assertTrue(any("went idle with open task" in t for t in self.herdr.prompts_to(self.orch)))
+
+    def test_registering_and_forgetting_use_the_real_path(self):
+        link = os.path.join(self.tmp, "old-place")
+        os.symlink(self.project, link)
+        team.register(os.path.join(link, "team.toml"))
+        self.assertEqual(self.registry(), [self.team_file])
+        self.assertEqual(team.unregister([os.path.join(link, "team.toml")]), [self.team_file])
+        self.assertEqual(self.registry(), [])
 
 
 class ReopenJourneyTest(JourneyCase):
@@ -541,6 +671,88 @@ class NamingJourneyTest(JourneyCase):
         self.assertEqual(self.herdr.launches_of(fe)[-1]["name"], "proj-fe")
         self.assertEqual(self.herdr.agent_name_of(fe), "proj-fe", "respawn keeps the plain name")
         self.assertEqual(self.herdr.pane(fe)["agent_session"]["value"], "sess-fe")
+
+
+class RestoreRobustnessTest(JourneyCase):
+    """What went wrong in a real restart, replayed: no agent may be left stopped."""
+
+    def build_team(self):
+        self.make_profile("fe")
+        self.init_team()
+        return self.hire("fe", "frontend"), self.hire("be", "backend")
+
+    def test_a_name_left_on_the_emptied_pane_moves_the_agent_to_a_fresh_pane(self):
+        fe, be = self.build_team()
+        orch_session = self.herdr.pane(self.orch)["agent_session"]["value"]
+        orch_name = self.herdr.agent_name_of(self.orch)
+        orch_tab = self.herdr.pane(self.orch)["tab_id"]
+        self.herdr.simulate_restart(keep_names=True)
+        self.herdr.sticky_names = {self.orch}  # Herdr keeps the name after the agent exits
+
+        log = self.restore()
+        self.assertIn("moving orchestrator to a fresh pane", log)
+        self.assertIsNone(self.herdr.pane(self.orch), "the dead pane is closed")
+        new = self.pane_of("orchestrator")
+        self.assertEqual(new["tab_id"], orch_tab)
+        self.assertEqual(new["agent"], "claude")
+        self.assertEqual(new["agent_session"]["value"], orch_session, "same conversation")
+        self.assertEqual(self.herdr.agent_name_of(new["pane_id"]), orch_name)
+        self.assertEqual(self.member_session("orchestrator"), orch_session)
+        notes = [t for t in self.herdr.prompts_to(new["pane_id"]) if t.startswith("[horchestra] Herdr restarted")]
+        self.assertEqual(len(notes), 1, "the orchestrator in its new pane is briefed")
+
+    def test_respawn_by_hand_survives_a_stuck_name_too(self):
+        fe, _ = self.build_team()
+        session = self.herdr.pane(fe)["agent_session"]["value"]
+        self.herdr.sticky_names = {fe}
+        self.ok("respawn", "fe")
+        new = self.pane_of("fe")
+        self.assertNotEqual(new["pane_id"], fe)
+        self.assertEqual((new["agent"], new["agent_session"]["value"]), ("claude", session))
+        self.assertEqual(arg_after(self.herdr.launches_of(new["pane_id"])[-1]["args"], "--agent"), "horchestra-fe")
+
+    def test_a_pane_id_that_goes_stale_during_startup_is_retried(self):
+        fe, be = self.build_team()
+        self.herdr.simulate_restart()
+        self.herdr.inject_error(("pane", "send-keys"), "pane_not_found", "pane not found")
+        log = self.restore()
+        self.assertIn("retrying", log)
+        self.assertNotIn("could not re-apply", log)
+        for pid in (fe, be):
+            self.assertFalse(self.herdr.launches_of(pid)[-1]["plain_resume"], "profile re-applied")
+
+    def test_restore_waits_for_the_team_to_settle_before_restarting_anyone(self):
+        fe, be = self.build_team()
+        self.herdr.simulate_restart()
+        start = self.clock.now
+        restarted_at = []
+        real = team.respawn
+        with mock.patch.object(team, "respawn",
+                               lambda *a, **k: (restarted_at.append(self.clock.now), real(*a, **k))[1]):
+            self.restore()
+        self.assertTrue(restarted_at)
+        # Herdr needs several seconds to finish its own resumes after startup.
+        self.assertGreaterEqual(restarted_at[0] - start, 10)
+
+    def test_names_survive_a_restart_that_drops_them(self):
+        fe_tab = self.herdr.add_tab(self.ws, "fe")
+        fe = self.herdr.add_agent(self.herdr.root_pane(fe_tab), session="sess-fe", name="proj-fe")
+        self.herdr.panes[self.orch]["name"] = "proj-orchestrator"
+        self.herdr.panes[self.orch]["label"] = "team:orchestrator"
+        self.herdr.panes[fe]["label"] = "team:fe"
+        self.write(self.team_file,
+                   'default_kind = "claude"\n\n[orchestrator]\nkind = "claude"\nsession = "sess-orch"\n\n'
+                   '[[member]]\nrole = "fe"\nkind = "claude"\ntask = "frontend"\nsession = "sess-fe"\n')
+        self.ok("init")  # registers the team; sync records the names it finds
+        self.assertEqual(self.member("fe")["agent_name"], "proj-fe")
+        self.herdr.simulate_restart()  # names dropped
+        self.restore()
+        self.assertEqual(self.herdr.agent_name_of(fe), "proj-fe", "not renamed to the hashed form")
+        self.assertEqual(self.herdr.agent_name_of(self.orch), "proj-orchestrator")
+
+    def member_session(self, role):
+        data = self.team_data()
+        return (data["orchestrator"] if role == "orchestrator" else self.member(role)).get("session")
 
 
 class ForgetJourneyTest(JourneyCase):

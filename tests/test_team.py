@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from tests import helpers  # noqa: F401
+from tests.fakeherdr import FakeClock
 import herdr_client as hc
 import team
 import toggle
@@ -607,7 +608,7 @@ class RestoreTest(unittest.TestCase):
             mock.patch.object(team, "sync", lambda *a, **k: None),
             mock.patch.object(team, "finish_restore",
                               lambda space, live, st, log: finished.append(space.team_file)),
-            mock.patch.object(team.time, "sleep", lambda _s: None),
+            mock.patch.object(team, "time", FakeClock()),
         ]
         for p in patches:
             p.start()
@@ -681,7 +682,7 @@ class RestoreLoadTest(StateDirTestCase):
         with mock.patch.object(team, "sync", lambda *a, **k: None), \
                 mock.patch.object(team, "finish_restore",
                                   lambda space, live, st, log: finished.append(space.team_file)), \
-                mock.patch.object(team.time, "sleep", lambda _s: None):
+                mock.patch.object(team, "time", FakeClock()):
             team.restore(log=logs.append)
         self.assertEqual(finished, [good])
         self.assertTrue(any(m.startswith(f"skip {bad}") for m in logs))
@@ -701,7 +702,7 @@ class RestoreLoadTest(StateDirTestCase):
                 mock.patch.object(team, "sync", lambda *a, **k: None), \
                 mock.patch.object(team, "finish_restore",
                                   lambda space, live, st, log: finished.append(space.team_file)), \
-                mock.patch.object(team.time, "sleep", lambda _s: None):
+                mock.patch.object(team, "time", FakeClock()):
             team.restore(log=logs.append)
         self.assertEqual(finished, [good])
         self.assertTrue(any("could not update the team registry" in m for m in logs))

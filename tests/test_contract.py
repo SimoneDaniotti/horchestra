@@ -148,7 +148,8 @@ AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 #                        reports blocked during startup, the command returns agent_not_ready"
 #   timeout              src/cli/agent.rs, src/api/wait.rs; docs: "the normal timeout error"
 #   agent_prompt_stalled src/api/wait.rs; docs: agent prompt --wait
-MATCHED_ERROR_CODES = {"agent_not_ready", "timeout", "agent_prompt_stalled"}
+#   pane_not_found       src/app/api/panes.rs; recorded in fixtures/herdr/errors/pane_get.json
+MATCHED_ERROR_CODES = {"agent_not_ready", "timeout", "agent_prompt_stalled", "pane_not_found"}
 # Herdr 0.9.3 error codes for the commands Horchestra runs (agent/pane/workspace
 # targets, agent start/prompt/wait), from the binary and src/app/agents.rs.
 HERDR_ERROR_CODES = {

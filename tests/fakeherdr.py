@@ -143,6 +143,9 @@ class FakeHerdr:
         self.notifications = []  # {"title", "body", "sound"}
         self.sent_keys = []  # (pane_id, [keys])
         self.injected = []  # [(argv prefix tuple, code, message)] consumed in order
+        # Panes whose agent name outlives the agent (seen in Herdr 0.9.3 right
+        # after a restart): the name stays bound until the pane closes.
+        self.sticky_names = set()
         self._ws_seq = itertools.count(1)
         self._term_seq = itertools.count(1)
         self._sess_seq = itertools.count(1)
@@ -403,7 +406,9 @@ class FakeHerdr:
                     self.focused_workspace = next(iter(self.workspaces), None)
 
     def _exit_agent(self, pane):
+        stale = pane["name"] if pane["pane_id"] in self.sticky_names else None
         pane.update(agent=None, agent_status=None, session=None, name=None, process=SHELL)
+        pane["stale_name"] = stale
 
     def _save_transcript(self, pane):
         if not self.claude_config_dir or pane["agent"] != "claude" or not pane["session"]:
@@ -430,7 +435,8 @@ class FakeHerdr:
         return info
 
     def _agent_info(self, p):
-        return dict(self._pane_info(p), name=p["name"], launch_pending=False, interactive_ready=True)
+        return dict(self._pane_info(p), name=p["name"] or p.get("stale_name"),
+                    launch_pending=False, interactive_ready=True)
 
     def _tab_info(self, t):
         return {"tab_id": t["tab_id"], "workspace_id": t["workspace_id"], "label": t["label"],
@@ -446,13 +452,18 @@ class FakeHerdr:
             (p for p in self.panes.values() if p["terminal_id"] == target), None)
         if pane is None:
             pane = next((p for p in self.panes.values() if p["agent"] and p["name"] == target), None)
+        if pane is None:
+            stuck = next((p for p in self.panes.values() if p.get("stale_name") == target), None)
+            if stuck is not None:
+                return stuck  # Herdr still reports the name, on a pane with no agent
         if pane is None or not pane["agent"]:
             raise FakeError("agent_not_found", f"agent target {target} not found")
         return pane
 
     def _name_conflicts(self, name, except_terminal=""):
         return [p for p in self.panes.values()
-                if p["agent"] and p["name"] == name and p["terminal_id"] != except_terminal]
+                if ((p["agent"] and p["name"] == name) or p.get("stale_name") == name)
+                and p["terminal_id"] != except_terminal]
 
     def _focus(self, pane):
         for p in self.panes.values():
@@ -673,7 +684,7 @@ class FakeHerdr:
             raise FakeError("invalid_agent_timeout",
                             "agent start timeout must be greater than 3000ms and at most 300000ms")
         session = self._resumed_session(kind, a.rest) or self._new_session()
-        pane.update(agent=kind, agent_status="idle", name=name, process=kind, session=session)
+        pane.update(agent=kind, agent_status="idle", name=name, process=kind, session=session, stale_name=None)
         self._save_transcript(pane)
         self.launches.append({"pane_id": pane["pane_id"], "name": name, "kind": kind,
                               "args": list(a.rest), "session": session, "plain_resume": False})
