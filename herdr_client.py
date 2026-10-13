@@ -89,11 +89,17 @@ def call(*args, timeout=5.0):
     return result if isinstance(result, dict) else {}
 
 
-def read_text(pane_id, lines=40, timeout=5.0):
-    """Recent plain-text output of a pane ('' on any failure)."""
+def read_text(pane_id, lines=40, timeout=5.0, source="recent", fmt=None):
+    """Recent plain-text output of a pane ('' on any failure).
+
+    source="detection" reads the bottom screen whatever the human scrolled
+    to; fmt="ansi" keeps the styling.
+    """
+    argv = [HERDR, "pane", "read", pane_id, "--source", source, "--lines", str(lines)]
+    argv += ["--format", fmt] if fmt else []
     try:
         proc = subprocess.run(
-            [HERDR, "pane", "read", pane_id, "--source", "recent", "--lines", str(lines)],
+            argv,
             capture_output=True,
             text=True,
             timeout=timeout,

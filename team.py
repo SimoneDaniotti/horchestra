@@ -24,6 +24,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 import herdr_client as hc  # noqa: E402
+import outbox  # noqa: E402
 import roles  # noqa: E402
 import tasks  # noqa: E402
 
@@ -606,7 +607,17 @@ def wait_until_ready(name, pane_id, log=print):
 
 
 def prompt(target, text):
-    hc.call("agent", "prompt", target, text, timeout=60)
+    """Send `text` to the agent in pane `target`; False when it was queued.
+
+    While the human has a draft in that agent's input box, the text waits
+    (outbox.py) and goes in once the box is empty, instead of being typed
+    into the middle of the draft.
+    """
+    return outbox.send(target, text, outbox.herdr_prompt)
+
+
+def held_note(role):
+    return f" (queued: someone is typing in {role}'s input box; it goes in once that is sent or cleared)"
 
 
 def split_largest(tab_panes, cwd):
@@ -1638,14 +1649,14 @@ def cmd_message(args):
     if not text:
         raise TeamError("give a message")
     # agent prompt queues the text even while the target is working.
-    prompt(target["pane_id"], f"[horchestra] message from {sender}: {text}")
+    sent = prompt(target["pane_id"], f"[horchestra] message from {sender}: {text}")
     if me.get("pane_id"):
         # Lets the agent map run a pulse from sender to receiver.
         try:
             hc.set_tokens(me["pane_id"], {hc.TOKEN_SIGNAL: hc.signal_value("msg", target["pane_id"])})
         except hc.HerdrError:
             pass  # the message itself went through
-    print(f"sent to {target_role}")
+    print(f"sent to {target_role}" + ("" if sent else held_note(target_role)))
 
 
 def cmd_report(args):
@@ -1992,7 +2003,7 @@ def cmd_assign(args):
         raise TeamError(f"{role} has no running agent (`horchestra-team sync` starts it)")
     task = tasks.add(space.root, role, " ".join(args.text))
     try:
-        prompt(target["pane_id"], task_prompt(task))
+        sent = prompt(target["pane_id"], task_prompt(task))
     except hc.HerdrError as exc:
         tasks.close(space.root, task["id"], "cancelled", f"not delivered: {exc}")
         raise TeamError(f"could not send task #{task['id']} to {role} (cancelled it): {exc}") from exc
@@ -2001,7 +2012,7 @@ def cmd_assign(args):
             hc.set_tokens(me["pane_id"], {hc.TOKEN_SIGNAL: hc.signal_value("msg", target["pane_id"])})
         except hc.HerdrError:
             pass
-    print(f"task #{task['id']} assigned to {role}")
+    print(f"task #{task['id']} assigned to {role}" + ("" if sent else held_note(role)))
 
 
 def parse_task_args(words):
