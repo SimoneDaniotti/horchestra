@@ -16,7 +16,8 @@ Fixed:
 
 - A report or message sent while you were typing to an agent was typed into
   your draft and submitted with it. It now waits until the input box is
-  empty, then goes in on its own.
+  empty, then goes in on its own. Claude's grey suggestion in an idle input
+  box does not count as a draft.
 
 - A restart could leave the orchestrator stopped: restore restarted it to
   refresh its instructions while Herdr was still resuming it, and Herdr kept
